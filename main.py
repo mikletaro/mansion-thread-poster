@@ -141,11 +141,18 @@ def main():
 
     for t in threads:
         url, title, count = t["url"], t["title"], t["count"]
-        diff = count - history.get(url, 0)
+        history_count = history.get(url, 0)
+        diff = count - history_count
+        print(f"▶ Checking: {title} | count: {count}, history: {history_count}, diff: {diff}")
+
         if diff <= 0 and url in history:
+            print("▶ Skipped (no diff)")
             continue
         if url not in history and count < 100:
+            print("▶ Skipped (new + low count)")
             continue
+
+        print("▶ Fetching thread text and judging risk...")
         text = fetch_thread_text(url)
         risk, comment, flag = judge_risk(text)
         candidates.append({"url": url, "diff": diff, "title": title, "risk": risk, "comment": comment, "flag": flag})
