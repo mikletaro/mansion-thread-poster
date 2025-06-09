@@ -2,15 +2,6 @@ name: Run Python Script Manually
 
 on:
   workflow_dispatch:
-    inputs:
-      script:
-        description: 'Choose which script to run'
-        required: true
-        default: 'candidate_extractor'
-        type: choice
-        options:
-          - candidate_extractor
-          - post_to_x
 
 jobs:
   run-script:
@@ -37,14 +28,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run selected script
-        run: |
-          if [ "${{ github.event.inputs.script }}" = "candidate_extractor" ]; then
-            python candidate_extractor.py
-          elif [ "${{ github.event.inputs.script }}" = "post_to_x" ]; then
-            python post_to_x.py
-          else
-            echo "Unknown script selected." && exit 1
+      - name: Run main script
+        run: python main.py
 
       - name: Show done
         run: echo "✅ Done"
