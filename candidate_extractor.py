@@ -21,15 +21,6 @@
  *   E列: スレURL（元スレの確認・重複防止用）
  */
 
-SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
-CLAUDE_API_KEY = os.environ['CLAUDE_API_KEY']
-TWITTER_API_KEY = os.environ['TWITTER_API_KEY']
-TWITTER_API_SECRET = os.environ['TWITTER_API_SECRET']
-TWITTER_ACCESS_TOKEN = os.environ['TWITTER_ACCESS_TOKEN']
-TWITTER_ACCESS_SECRET = os.environ['TWITTER_ACCESS_SECRET']
-
-# GASからPythonへの完全移行を見据えた構成にする
-# 残りのコード（差分取得、リスク判定、要約生成、スプレッドシート書き込みなど）は別途定義
 import os
 import datetime
 import random
@@ -157,7 +148,8 @@ def main():
         candidates.append({"url": url, "diff": diff, "title": title, "risk": risk, "comment": comment, "flag": flag})
         updated[url] = count
 
-    save_history({**history, **updated})
+    if os.environ.get("TEST_MODE") != "1":
+        save_history({**history, **updated})
 
     candidates.sort(key=lambda x: x["diff"], reverse=True)
     write_candidates = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
@@ -182,6 +174,7 @@ def main():
         utm = f"?utm_source=x&utm_medium=em-{thread_id}&utm_campaign={post_date.strftime('%Y%m%d')}"
         post_text = f"{summary}\n#マンションコミュニティ\n{c['url']}{utm}"
         post_sheet.append_row([post_date.strftime("%Y/%m/%d"), time, post_text, "FALSE", c["url"]])
+
 
 if __name__ == "__main__":
     main()
