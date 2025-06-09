@@ -127,15 +127,15 @@ def judge_risk(text):
         risk_lines = [line for line in content.splitlines() if line.startswith("リスク：")]
 
         if any("高" in line for line in risk_lines):
-            return "高", content, "NG"
-        elif any("低" in line for line in risk_lines):
-            return "低", content, "OK"
-        elif any("不明" in line for line in risk_lines):
-            return "不明", content, "NG"
+            risk = "高"
         else:
-            return "不明", content, "NG"
+            risk = "低"
+
+        flag = "NG" if risk == "高" else "OK"
+        return risk, content, flag
+
     except Exception as e:
-        return "不明", f"[Error] {str(e)}", "NG"
+        return "高", f"[Error] {str(e)}", "NG"
 
 def generate_summary(text):
     prompt = f"""
