@@ -28,5 +28,6 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GCP_SERVICE_ACCOUNT_B64: ${{ secrets.GCP_SERVICE_ACCOUNT_B64 }}
           CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          TEST_MODE: "1"
         run: |
           python main.py
