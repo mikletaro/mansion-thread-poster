@@ -88,11 +88,23 @@ def save_history(history):
 def fetch_thread_text(url):
     text = ""
     for i in range(1, 6):
-        html_page = requests.get(f"{url}?page={i}").text
+        page_url = f"{url}?page={i}"
+        print(f"▶ Fetching thread page: {page_url}")
+        html_page = requests.get(page_url).text
+
+        # デバッグ: ページ内の一部を表示（念のため確認）
+        print(f"▶ PAGE {i} preview:\n{html_page[:500]}\n")
+
+        # レス抽出
         posts = re.findall(r'<p itemprop="commentText">([\s\S]*?)</p>', html_page)
+        print(f"▶ Found {len(posts)} posts on page {i}")
+
         for post in posts:
             plain = re.sub(r'<[^>]+>', '', post).replace('\u3000', ' ').strip()
             text += plain + "\n"
+
+    print(f"▶ Final combined text length: {len(text)}")
+    print(f"▶ Sample combined text:\n{text[:100]}...\n")
     return text
 
 def judge_risk(text):
