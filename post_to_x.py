@@ -2,7 +2,9 @@ import os
 import time
 import requests
 from requests_oauthlib import OAuth1Session
+from dotenv import load_dotenv
 
+load_dotenv()
 # 認証情報（GitHub Secretsや.envから設定）
 API_KEY = os.environ['TWITTER_API_KEY']
 API_SECRET = os.environ['TWITTER_API_SECRET']
