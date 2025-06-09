@@ -45,31 +45,13 @@ def fetch_threads():
         if res.status_code != 200:
             print(f"▶ ERROR: Failed to fetch page {page}")
             continue
-
-        # <a href=...> ～ </a> の中に各スレッドブロックがある
-        blocks = re.findall(r'<a href="/bbs/thread/\d+/".*?</a>', res.text, re.DOTALL)
+        blocks = re.findall(r'<a href="/bbs/thread/(\d+)/" class="component_thread_list_item link.*?<span class="num_of_item">(\d+)</span>.*?<div class="oneliner title"[^>]*>(.*?)</div>', res.text, re.DOTALL)
         print(f"▶ Found {len(blocks)} thread blocks")
-
-        for block in blocks:
-            tid_match = re.search(r'/bbs/thread/(\d+)/', block)
-            if not tid_match:
-                print("▶ WARN: thread ID not found")
-                continue
-            tid = tid_match.group(1)
-            thread_url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/"
-
-            title_match = re.search(r'<div class="oneliner title"[^>]*>(.*?)</div>', block, re.DOTALL)
-            title = html.unescape(title_match.group(1)).strip() if title_match else "(no title)"
-
-            count_match = re.search(r'<span class="num_of_item">(\d+)</span>', block)
-            count = int(count_match.group(1)) if count_match else 0
-
-            threads.append({
-                "url": thread_url,
-                "title": title,
-                "count": count
-            })
-
+        for tid, count, title in blocks:
+            url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/"
+            title = html.unescape(title).strip()
+            count = int(count)
+            threads.append({"url": url, "title": title, "count": count})
     print(f"▶ Fetched {len(threads)} threads")
     return threads
 
@@ -82,25 +64,15 @@ def save_history(history):
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
     rows = [[url, count, datetime.datetime.now().strftime("%Y/%m/%d")] for url, count in history.items()]
     sheet.clear()
-    sheet.append_row(["スレURL", "取得時のレス数", "最終取得日"])
+    sheet.append_row(["URL", "取得時レス数", "最終取得日"])
     sheet.append_rows(rows)
 
 def fetch_thread_text(url):
     text = ""
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Referer": "https://www.e-mansion.co.jp/"
-    })
-
     for i in range(1, 6):
         page_url = f"{url}?page={i}"
         print(f"▶ Fetching thread page: {page_url}")
-        res = session.get(page_url)
-        if res.status_code != 200:
-            print(f"▶ ERROR: {res.status_code} on {page_url}")
-            continue
-        html_page = res.text
+        html_page = requests.get(page_url).text
         posts = re.findall(r'<p itemprop="commentText">([\s\S]*?)</p>', html_page)
         print(f"▶ Found {len(posts)} posts on page {i}")
         for post in posts:
@@ -112,7 +84,7 @@ def judge_risk(text):
     try:
         prompt = f"""
 以下は掲示板の書き込み内容です。この中に炎上しそうな内容が含まれていないかを判定してください。
-最初に「リスク：高」「リスク：低」「リスク：不明」のいずれかを明示してください。そのあとに簡単な根拠も記述してください。
+最初に「リスク：高」「リスク：低」「リスク：不明」のいずれかを明示してください。そのあとに簡単な根拠も説明してください。
 --- 本文 ---
 {text}
 """
@@ -138,7 +110,7 @@ def judge_risk(text):
         else:
             return "不明", content, "NG"
     except Exception as e:
-        return "不明", f"[エラー] {str(e)}", "NG"
+        return "不明", f"[Error] {str(e)}", "NG"
 
 def generate_summary(text):
     prompt = f"""
@@ -183,23 +155,28 @@ def main():
         candidates.append({"url": url, "diff": diff, "title": title, "risk": risk, "comment": comment, "flag": flag})
         updated[url] = count
 
+    print(f"▶ All candidates: {len(candidates)} 件")
+    for c in candidates:
+        print(f"▶ Candidate: {c['title']} | diff: {c['diff']} | flag: {c['flag']}")
+
     if os.getenv("TEST_MODE") != "1":
         save_history({**history, **updated})
 
     candidates.sort(key=lambda x: x["diff"], reverse=True)
     write_candidates = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     write_candidates.clear()
-    write_candidates.append_row(["スレURL", "差分レス数", "タイトル", "炎上リスク判定", "コメント", "投稿可否"])
+    write_candidates.append_row(["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"])
     for c in candidates[:20]:
         write_candidates.append_row([c["url"], c["diff"], c["title"], c["risk"], c["comment"], c["flag"]])
 
     ok_candidates = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
+    print(f"▶ OK candidates: {len(ok_candidates)} 件")
     random.shuffle(ok_candidates)
 
     today = datetime.date.today()
     post_sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     post_sheet.clear()
-    post_sheet.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "スレURL"])
+    post_sheet.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
 
     for i, c in enumerate(ok_candidates):
         post_date = today + datetime.timedelta(days=1 + i // 2)
