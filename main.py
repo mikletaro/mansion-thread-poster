@@ -25,11 +25,16 @@ POST_COUNT = 14
 
 
 def fetch_threads():
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
     threads = []
     for page in range(1, MAX_PAGES + 1):
         url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
-        res = requests.get(url)
-        matches = re.findall(r'<a href="/bbs/thread/(\d+)/"[\s\S]*?<div class="oneliner title"[^>]*>([\s\S]*?)</div>[\s\S]*?<span class="num_of_item">(\d+)</span>', res.text)
+        res = requests.get(url, headers=HEADERS)
+        matches = re.findall(
+            r'<a href="/bbs/thread/(\d+)/"[\s\S]*?<div class="oneliner title"[^>]*>([\s\S]*?)</div>[\s\S]*?<span class="num_of_item">(\d+)</span>',
+            res.text)
         for tid, title, count in matches:
             threads.append({
                 "url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
@@ -38,6 +43,7 @@ def fetch_threads():
             })
     print(f"▶ Fetched {len(threads)} threads")
     return threads
+
 
 
 def load_history():
