@@ -1,0 +1,41 @@
+name: Run Python Script Manually
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: 'Choose which script to run'
+        required: true
+        default: 'candidate_extractor'
+        type: choice
+        options:
+          - candidate_extractor
+          - post_to_x
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run selected script
+        run: |
+          if [ "${{ github.event.inputs.script }}" = "candidate_extractor" ]; then
+            python candidate_extractor.py
+          elif [ "${{ github.event.inputs.script }}" = "post_to_x" ]; then
+            python post_to_x.py
+          fi
+
+      - name: Show done
+        run: echo "✅ Done"
