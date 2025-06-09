@@ -1,33 +1,50 @@
 import os
-import time
+import datetime
 import requests
-from requests_oauthlib import OAuth1Session
-from dotenv import load_dotenv
+import gspread
+from google.oauth2.service_account import Credentials
 
-load_dotenv()
-# 認証情報（GitHub Secretsや.envから設定）
-API_KEY = os.environ['TWITTER_API_KEY']
-API_SECRET = os.environ['TWITTER_API_SECRET']
-ACCESS_TOKEN = os.environ['TWITTER_ACCESS_TOKEN']
-ACCESS_SECRET = os.environ['TWITTER_ACCESS_SECRET']
+SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
+X_API_KEY = os.environ['X_API_KEY']
+X_API_SECRET = os.environ['X_API_SECRET']
+X_ACCESS_TOKEN = os.environ['X_ACCESS_TOKEN']
+X_ACCESS_SECRET = os.environ['X_ACCESS_SECRET']
 
-# 投稿したいテキスト（仮に引数またはファイルで受け取る想定）
-def post_to_x(status_text: str):
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+CREDS = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
+GC = gspread.authorize(CREDS)
+
+POST_SHEET = "投稿予定"
+
+
+def post_to_x(text):
     url = "https://api.twitter.com/2/tweets"
-    oauth = OAuth1Session(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
+    headers = {
+        "Authorization": f"Bearer {X_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+        "x-api-version": "2025-04"
+    }
+    payload = {"text": text}
+    response = requests.post(url, headers=headers, json=payload)
+    return response.status_code == 201
 
-    payload = { "text": status_text }
-    response = oauth.post(url, json=payload)
 
-    if response.status_code == 201:
-        print("✅ 投稿成功")
-        print("📝", response.json())
-    else:
-        print("❌ 投稿失敗")
-        print("Status:", response.status_code)
-        print(response.text)
-        raise Exception("投稿に失敗しました")
+def main():
+    sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
+    data = sheet.get_all_values()[1:]
+    now = datetime.datetime.now()
+    today = now.strftime("%Y/%m/%d")
+    hour, minute = now.hour, now.minute
+
+    for i, row in enumerate(data):
+        date, time_str, text, posted, *_ = row
+        if posted.upper() == "TRUE" or date != today:
+            continue
+        h, m = map(int, time_str.split(":"))
+        if hour == h and minute >= m:
+            if post_to_x(text):
+                sheet.update_cell(i + 2, 4, "TRUE")
+
 
 if __name__ == "__main__":
-    # 例：固定文を投稿（GitHub Actionsでファイルや引数に置き換え可）
-    post_to_x("これは #マンションコミュニティ の自動投稿テストです https://example.com/")
+    main()
