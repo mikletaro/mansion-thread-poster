@@ -33,6 +33,7 @@ POST_SHEET = "投稿予定"
 MAX_PAGES = 3
 POST_COUNT = 14
 
+
 def fetch_threads():
     threads = []
     headers = {
@@ -55,10 +56,12 @@ def fetch_threads():
     print(f"▶ Fetched {len(threads)} threads")
     return threads
 
+
 def load_history():
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
     data = sheet.get_all_values()[1:]
     return {row[0]: int(row[1]) for row in data if len(row) > 1 and row[1].isdigit()}
+
 
 def save_history(history):
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
@@ -66,6 +69,7 @@ def save_history(history):
     sheet.clear()
     sheet.append_row(["URL", "取得時レス数", "最終取得日"])
     sheet.append_rows(rows)
+
 
 def fetch_thread_text(url):
     text = ""
@@ -79,6 +83,7 @@ def fetch_thread_text(url):
             plain = re.sub(r'<[^>]+>', '', post).replace('\u3000', ' ').strip()
             text += plain + "\n"
     return text
+
 
 def judge_risk(text):
     try:
@@ -112,6 +117,7 @@ def judge_risk(text):
     except Exception as e:
         return "不明", f"[Error] {str(e)}", "NG"
 
+
 def generate_summary(text):
     prompt = f"""
 以下は掲示板の書き込み内容です。内容を120文字以内で自然な1文にしてください。前置き・要点整理・説明は禁止です。
@@ -130,11 +136,11 @@ def generate_summary(text):
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
     return res.json()["content"][0]["text"].strip()
 
+
 def main():
     threads = fetch_threads()
     history = load_history()
-    updated = {}
-    candidates = []
+    diffs = []
 
     for t in threads:
         url, title, count = t["url"], t["title"], t["count"]
@@ -143,17 +149,24 @@ def main():
         print(f"▶ Checking: {title} | count: {count}, history: {history_count}, diff: {diff}")
 
         if diff <= 0 and url in history:
-            print("▶ Skipped (no diff)")
             continue
         if url not in history and count < 100:
-            print("▶ Skipped (new + low count)")
             continue
 
-        print("▶ Fetching thread text and judging risk...")
-        text = fetch_thread_text(url)
+        diffs.append({"url": url, "title": title, "diff": diff, "count": count})
+
+    top_diffs = sorted(diffs, key=lambda x: x["diff"], reverse=True)[:20]
+    print(f"▶ Selected top {len(top_diffs)} threads for risk check")
+
+    candidates = []
+    updated = {}
+
+    for t in top_diffs:
+        print(f"▶ Fetching thread text and judging risk for: {t['title']}")
+        text = fetch_thread_text(t["url"])
         risk, comment, flag = judge_risk(text)
-        candidates.append({"url": url, "diff": diff, "title": title, "risk": risk, "comment": comment, "flag": flag})
-        updated[url] = count
+        candidates.append({"url": t["url"], "diff": t["diff"], "title": t["title"], "risk": risk, "comment": comment, "flag": flag})
+        updated[t["url"]] = t["count"]
 
     print(f"▶ All candidates: {len(candidates)} 件")
     for c in candidates:
@@ -166,7 +179,7 @@ def main():
     write_candidates = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     write_candidates.clear()
     write_candidates.append_row(["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"])
-    for c in candidates[:20]:
+    for c in candidates:
         write_candidates.append_row([c["url"], c["diff"], c["title"], c["risk"], c["comment"], c["flag"]])
 
     ok_candidates = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
@@ -186,6 +199,7 @@ def main():
         utm = f"?utm_source=x&utm_medium=em-{thread_id}&utm_campaign={post_date.strftime('%Y%m%d')}"
         post_text = f"{summary}\n#マンションコミュニティ\n{c['url']}{utm}"
         post_sheet.append_row([post_date.strftime("%Y/%m/%d"), time, post_text, "FALSE", c["url"]])
+
 
 if __name__ == "__main__":
     main()
