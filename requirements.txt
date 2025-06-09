@@ -1,3 +1,4 @@
+gspread
+google-auth
 requests
-requests-oauthlib
-python-dotenv  # （任意、.envを使う場合）
+
