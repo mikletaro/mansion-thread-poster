@@ -45,7 +45,6 @@ jobs:
             python post_to_x.py
           else
             echo "Unknown script selected." && exit 1
-          fi
 
       - name: Show done
         run: echo "✅ Done"
