@@ -1,26 +1,3 @@
-/**
- * スプレッドシート構成
- * [スレ履歴] 
- *   A列: スレURL 
- *   B列: 取得時のレス数 
- *   C列: 最終取得日
- * 
- * [投稿候補] 
- *   A列: スレURL 
- *   B列: 差分レス数 
- *   C列: タイトル 
- *   D列: 炎上リスク判定（低／高／不明） 
- *   E列: コメント（リスク理由） 
- *   F列: 投稿可否（OK／NG）
-
- * [投稿予定] 
- *   A列: 投稿日（yyyy/MM/dd） 
- *   B列: 投稿時間（8:00 / 15:00） 
- *   C列: 投稿テキスト（要約＋#マンションコミュニティ＋URL） 
- *   D列: 投稿済み（TRUE/FALSE） 
- *   E列: スレURL（元スレの確認・重複防止用）
- */
-
 import os
 import datetime
 import random
@@ -61,7 +38,7 @@ def fetch_threads():
 def load_history():
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
     data = sheet.get_all_values()[1:]
-    return {row[0]: int(row[1]) for row in data}
+    return {row[0]: int(row[1]) for row in data if len(row) > 1 and row[1].isdigit()}
 
 
 def save_history(history):
@@ -84,31 +61,36 @@ def fetch_thread_text(url):
 
 
 def judge_risk(text):
-    prompt = f"""
+    try:
+        prompt = f"""
 以下は掲示板の書き込み内容です。この中に炎上しそうな内容が含まれていないかを判定してください。
 最初に「リスク：高」「リスク：低」「リスク：不明」のいずれかを明示してください。そのあとに簡単な根拠も記述してください。
 --- 本文 ---
 {text}
 """
-    payload = {
-        "model": "claude-3-haiku-20240307",
-        "temperature": 0,
-        "max_tokens": 300,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    headers = {
-        "x-api-key": CLAUDE_API_KEY,
-        "anthropic-version": "2023-06-01"
-    }
-    res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
-    content = res.json()["content"][0]["text"].strip()
-    risk_line = next((line for line in content.splitlines() if line.startswith("リスク：")), "")
-    if "高" in risk_line:
-        return "高", content, "NG"
-    elif "低" in risk_line:
-        return "低", content, "OK"
-    else:
-        return "不明", content, "NG"
+        payload = {
+            "model": "claude-3-haiku-20240307",
+            "temperature": 0,
+            "max_tokens": 300,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        headers = {
+            "x-api-key": CLAUDE_API_KEY,
+            "anthropic-version": "2023-06-01"
+        }
+        res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+        content = res.json()["content"][0]["text"].strip()
+        risk_line = next((line for line in content.splitlines() if line.startswith("リスク：")), "")
+        if "高" in risk_line:
+            return "高", content, "NG"
+        elif "低" in risk_line:
+            return "低", content, "OK"
+        elif "不明" in risk_line:
+            return "不明", content, "NG"
+        else:
+            return "不明", content, "NG"
+    except Exception as e:
+        return "不明", f"[エラー] {str(e)}", "NG"
 
 
 def generate_summary(text):
