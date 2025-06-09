@@ -62,9 +62,7 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     }
-
     posts = []
-
     for page in range(1, max_pages + 1):
         url = base_url + str(page)
         print(f"▶ Fetching thread page: {url}")
@@ -74,18 +72,14 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
         except requests.RequestException as e:
             print(f"▶ Error fetching page {page} of thread {thread_id}: {e}")
             continue
-
         soup = BeautifulSoup(resp.text, 'html.parser')
         comment_tags = soup.select('p[itemprop="commentText"]')
         print(f"▶ Found {len(comment_tags)} posts on page {page}")
-
         for tag in comment_tags:
             text = tag.get_text(strip=True)
             if text:
                 posts.append(text)
-
         time.sleep(delay_sec)
-
     return posts
 
 def fetch_thread_text(url):
@@ -164,12 +158,10 @@ def main():
         history_count = history.get(url, 0)
         diff = count - history_count
         print(f"▶ Checking: {title} | count: {count}, history: {history_count}, diff: {diff}")
-
         if diff <= 0 and url in history:
             continue
         if url not in history and count < 100:
             continue
-
         diffs.append({"url": url, "title": title, "diff": diff, "count": count})
 
     top_diffs = sorted(diffs, key=lambda x: x["diff"], reverse=True)[:20]
@@ -185,12 +177,10 @@ def main():
         if thread_id in seen:
             continue
         seen.add(thread_id)
-
         text = fetch_thread_text(t["url"])
         if not text.strip():
             print(f"▶ No posts found for thread {t['title']} — skipping.")
             continue
-
         risk, comment, flag = judge_risk(text)
         candidates.append({
             "url": t["url"],
@@ -206,19 +196,21 @@ def main():
     for c in candidates:
         print(f"▶ Candidate: {c['title']} | diff: {c['diff']} | flag: {c['flag']}")
 
-    if os.getenv("TEST_MODE") != "1":
-        save_history({**history, **updated})
+    ok_candidates = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
+    print(f"▶ OK candidates: {len(ok_candidates)} 件")
+    random.shuffle(ok_candidates)
 
-    candidates.sort(key=lambda x: x["diff"], reverse=True)
+    if os.getenv("TEST_MODE") != "1":
+        updated_ok = {c["url"]: updated[c["url"]] for c in ok_candidates}
+        save_history({**history, **updated_ok})
+    else:
+        print("▶ TEST_MODE: スレ履歴は更新しません")
+
     write_candidates = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     write_candidates.clear()
     write_candidates.append_row(["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"])
     for c in candidates:
         write_candidates.append_row([c["url"], c["diff"], c["title"], c["risk"], c["comment"], c["flag"]])
-
-    ok_candidates = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
-    print(f"▶ OK candidates: {len(ok_candidates)} 件")
-    random.shuffle(ok_candidates)
 
     today = datetime.date.today()
     post_sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
