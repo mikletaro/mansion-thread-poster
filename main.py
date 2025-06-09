@@ -5,16 +5,18 @@ import re
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
+import json
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
 CLAUDE_API_KEY = os.environ['CLAUDE_API_KEY']
+TEST_MODE = os.environ.get("TEST_MODE") == "1"
+print(f"▶ TEST_MODE: {TEST_MODE}")
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # service_account.json をシークレットから復元
 with open("service_account.json", "w") as f:
-    import base64
-    decoded = base64.b64decode(os.environ['GCP_SERVICE_ACCOUNT_B64']).decode()
-    f.write(decoded)
+    f.write(os.environ['GCP_SERVICE_ACCOUNT_JSON'])
 
 CREDS = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
 GC = gspread.authorize(CREDS)
@@ -38,6 +40,7 @@ def fetch_threads():
                 "title": title.strip(),
                 "count": int(count)
             })
+    print(f"▶ Fetched {len(threads)} threads")
     return threads
 
 
@@ -45,6 +48,15 @@ def load_history():
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
     data = sheet.get_all_values()[1:]
     return {row[0]: int(row[1]) for row in data if len(row) > 1 and row[1].isdigit()}
+
+
+def save_history(history):
+    sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
+    rows = [[url, count, datetime.datetime.now().strftime("%Y/%m/%d")] for url, count in history.items()]
+    sheet.clear()
+    sheet.append_row(["スレURL", "取得時のレス数", "最終取得日"])
+    sheet.append_rows(rows)
+    print(f"▶ Updated history with {len(history)} threads")
 
 
 def fetch_thread_text(url):
@@ -79,6 +91,7 @@ def judge_risk(text):
         res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
         content = res.json()["content"][0]["text"].strip()
         risk_line = next((line for line in content.splitlines() if line.startswith("リスク：")), "")
+        print(f"▶ Risk Line: {risk_line}")
         if "高" in risk_line:
             return "高", content, "NG"
         elif "低" in risk_line:
@@ -125,27 +138,26 @@ def main():
             continue
         text = fetch_thread_text(url)
         risk, comment, flag = judge_risk(text)
+        print(f"▶ {title}｜diff: {diff}｜risk: {risk}｜flag: {flag}")
         candidates.append({"url": url, "diff": diff, "title": title, "risk": risk, "comment": comment, "flag": flag})
         updated[url] = count
 
-    # 履歴の更新は TEST_MODE=1 のときはスキップ
-    if os.environ.get("TEST_MODE") != "1":
-        sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
-        rows = [[url, count, datetime.datetime.now().strftime("%Y/%m/%d")] for url, count in {**history, **updated}.items()]
-        sheet.clear()
-        sheet.append_row(["スレURL", "取得時のレス数", "最終取得日"])
-        sheet.append_rows(rows)
+    if not TEST_MODE:
+        save_history({**history, **updated})
 
     candidates.sort(key=lambda x: x["diff"], reverse=True)
+    ok_candidates = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
+    print(f"▶ 投稿候補（OK）: {len(ok_candidates)} 件")
+
+    # 投稿候補書き込み
     write_candidates = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     write_candidates.clear()
     write_candidates.append_row(["スレURL", "差分レス数", "タイトル", "炎上リスク判定", "コメント", "投稿可否"])
     for c in candidates[:20]:
         write_candidates.append_row([c["url"], c["diff"], c["title"], c["risk"], c["comment"], c["flag"]])
 
-    ok_candidates = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
+    # 投稿予定書き込み
     random.shuffle(ok_candidates)
-
     today = datetime.date.today()
     post_sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     post_sheet.clear()
