@@ -1,0 +1,17 @@
+# 機密情報
+.env
+*.env
+
+# Pythonキャッシュ
+__pycache__/
+*.py[cod]
+
+# VS Code設定（使っていれば）
+.vscode/
+
+# macOS特有のファイル
+.DS_Store
+
+# テストログや一時ファイル
+*.log
+*.tmp
