@@ -1,35 +1,32 @@
-name: Run Python Script Manually
+name: Run mansion-thread-poster
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'  # 毎日 09:00 JST（00:00 UTC）に実行
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
     env:
-      TEST_MODE: "1"
+      TEST_MODE: "1"  # 履歴更新をスキップしたいときだけ "1"
       SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
       GCP_SERVICE_ACCOUNT_B64: ${{ secrets.GCP_SERVICE_ACCOUNT_B64 }}
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Write service_account.json from base64 secret
-        run: echo "$GCP_SERVICE_ACCOUNT_B64" | base64 -d > service_account.json
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run main script
+      - name: Run script
         run: python main.py
-
-      - name: Show done
-        run: echo "✅ Done"
