@@ -33,18 +33,41 @@ MAX_PAGES = 3
 POST_COUNT = 14
 
 def fetch_threads():
+    import html
     threads = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    }
+
     for page in range(1, MAX_PAGES + 1):
         url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
         print(f"▶ Fetching: {url}")
-        res = requests.get(url)
-        matches = re.findall(r'<a href="/bbs/thread/(\d+)/"[\s\S]*?<div class="oneliner title"[^>]*>([\s\S]*?)</div>[\s\S]*?<span class="num_of_item">(\d+)</span>', res.text)
-        for tid, title, count in matches:
-            threads.append({
-                "url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
-                "title": title.strip(),
-                "count": int(count)
-            })
+        res = requests.get(url, headers=headers)
+        if res.status_code != 200:
+            print(f"▶ ERROR: Failed to fetch page {page}")
+            continue
+
+        blocks = re.findall(r'<div class="list_item detail">(.*?)</div>\s*</div>', res.text, re.DOTALL)
+        print(f"▶ Found {len(blocks)} thread blocks")
+
+        for block in blocks:
+            # スレッドID（URL）を取得（例: "/bbs/thread/123456/"）
+            tid_match = re.search(r'/bbs/thread/(\d+)/', block)
+            if not tid_match:
+                continue
+            tid = tid_match.group(1)
+            url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/"
+
+            # タイトル
+            title_match = re.search(r'<div class="oneliner title"[^>]*>(.*?)</div>', block, re.DOTALL)
+            title = html.unescape(title_match.group(1)).strip() if title_match else "(no title)"
+
+            # レス数
+            count_match = re.search(r'<span class="num_of_item">(\d+)</span>', block)
+            count = int(count_match.group(1)) if count_match else 0
+
+            threads.append({"url": url, "title": title, "count": count})
+
     print(f"▶ Fetched {len(threads)} threads")
     return threads
 
