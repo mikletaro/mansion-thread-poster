@@ -14,10 +14,6 @@ print(f"▶ TEST_MODE: {TEST_MODE}")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-# service_account.json をシークレットから復元
-with open("service_account.json", "w") as f:
-    f.write(os.environ['GCP_SERVICE_ACCOUNT_JSON'])
-
 CREDS = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
 GC = gspread.authorize(CREDS)
 
