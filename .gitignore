@@ -15,3 +15,5 @@ __pycache__/
 # テストログや一時ファイル
 *.log
 *.tmp
+
+service_account.json
