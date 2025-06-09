@@ -153,7 +153,12 @@ def generate_summary(text):
         "anthropic-version": "2023-06-01"
     }
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
-    return res.json()["content"][0]["text"].strip()
+    summary = res.json()["content"][0]["text"].strip()
+
+    if summary.startswith("「") and summary.endswith("」"):
+        summary = summary[1:-1]
+
+    return summary
 
 def main():
     threads = fetch_threads()
