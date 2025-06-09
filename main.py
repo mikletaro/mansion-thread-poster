@@ -8,6 +8,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 import html
 import json
+import requests
+from bs4 import BeautifulSoup
+import time
 
 print(f"▶ TEST_MODE: {os.getenv('TEST_MODE')}")
 
@@ -56,6 +59,35 @@ def fetch_threads():
     print(f"▶ Fetched {len(threads)} threads")
     return threads
 
+def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.0) -> list[str]:
+    base_url = f"https://www.e-mansion.co.jp/bbs/thread/{thread_id}/?page="
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    }
+
+    posts = []
+
+    for page in range(1, max_pages + 1):
+        url = base_url + str(page)
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            print(f"▶ Error fetching page {page} of thread {thread_id}: {e}")
+            continue
+
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        comment_tags = soup.select('p[itemprop="commentText"]')
+        print(f"▶ Found {len(comment_tags)} posts on page {page}")
+
+        for tag in comment_tags:
+            text = tag.get_text(strip=True)
+            if text:
+                posts.append(text)
+
+        time.sleep(delay_sec)
+
+    return posts
 
 def load_history():
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
