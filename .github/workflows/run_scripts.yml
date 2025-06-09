@@ -30,7 +30,8 @@ jobs:
           python-version: '3.11'
 
       - name: Write service_account.json from secret
-        run: echo "$GCP_SERVICE_ACCOUNT_JSON" > service_account.json
+        run: printf "%b" "$GCP_SERVICE_ACCOUNT_JSON" > service_account.json
+
 
       - name: Install dependencies
         run: |
