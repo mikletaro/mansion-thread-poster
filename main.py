@@ -62,7 +62,9 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     }
+
     posts = []
+
     for page in range(1, max_pages + 1):
         url = base_url + str(page)
         print(f"▶ Fetching thread page: {url}")
@@ -72,14 +74,18 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
         except requests.RequestException as e:
             print(f"▶ Error fetching page {page} of thread {thread_id}: {e}")
             continue
+
         soup = BeautifulSoup(resp.text, 'html.parser')
         comment_tags = soup.select('p[itemprop="commentText"]')
         print(f"▶ Found {len(comment_tags)} posts on page {page}")
+
         for tag in comment_tags:
             text = tag.get_text(strip=True)
             if text:
                 posts.append(text)
+
         time.sleep(delay_sec)
+
     return posts
 
 def fetch_thread_text(url):
@@ -118,7 +124,8 @@ def judge_risk(text):
         }
         res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
         content = res.json()["content"][0]["text"].strip()
-        risk_line = next((line for line in content.splitlines() if line.startswith("リスク：")), "")
+        risk_lines = [line for line in content.splitlines() if line.startswith("リスク：")]
+        risk_line = risk_lines[-1] if risk_lines else ""
         if "高" in risk_line:
             return "高", content, "NG"
         elif "低" in risk_line:
@@ -132,7 +139,7 @@ def judge_risk(text):
 
 def generate_summary(text):
     prompt = f"""
-以下は掲示板の書き込み内容です。内容を120文字以内で自然な1文にしてください。前置き・要点整理・説明は禁止です。
+以下は掲示板の書き込み内容です。内容を120文字以内で読みたくなるタイトルを考えて、タイトルのみ出力する。前置き・要点整理・説明は禁止です。
 {text}
 """
     payload = {
@@ -158,10 +165,12 @@ def main():
         history_count = history.get(url, 0)
         diff = count - history_count
         print(f"▶ Checking: {title} | count: {count}, history: {history_count}, diff: {diff}")
+
         if diff <= 0 and url in history:
             continue
         if url not in history and count < 100:
             continue
+
         diffs.append({"url": url, "title": title, "diff": diff, "count": count})
 
     top_diffs = sorted(diffs, key=lambda x: x["diff"], reverse=True)[:20]
@@ -177,10 +186,12 @@ def main():
         if thread_id in seen:
             continue
         seen.add(thread_id)
+
         text = fetch_thread_text(t["url"])
         if not text.strip():
             print(f"▶ No posts found for thread {t['title']} — skipping.")
             continue
+
         risk, comment, flag = judge_risk(text)
         candidates.append({
             "url": t["url"],
@@ -206,6 +217,7 @@ def main():
     else:
         print("▶ TEST_MODE: スレ履歴は更新しません")
 
+    candidates.sort(key=lambda x: x["diff"], reverse=True)
     write_candidates = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     write_candidates.clear()
     write_candidates.append_row(["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"])
