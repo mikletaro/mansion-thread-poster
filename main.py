@@ -6,6 +6,7 @@ import re
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
+import html
 import json
 
 print(f"▶ TEST_MODE: {os.getenv('TEST_MODE')}")
@@ -33,12 +34,10 @@ MAX_PAGES = 3
 POST_COUNT = 14
 
 def fetch_threads():
-    import html
     threads = []
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
     }
-
     for page in range(1, MAX_PAGES + 1):
         url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
         print(f"▶ Fetching: {url}")
@@ -46,28 +45,19 @@ def fetch_threads():
         if res.status_code != 200:
             print(f"▶ ERROR: Failed to fetch page {page}")
             continue
-
         blocks = re.findall(r'<div class="list_item detail">(.*?)</div>\s*</div>', res.text, re.DOTALL)
         print(f"▶ Found {len(blocks)} thread blocks")
-
         for block in blocks:
-            # スレッドID（URL）を取得（例: "/bbs/thread/123456/"）
             tid_match = re.search(r'/bbs/thread/(\d+)/', block)
             if not tid_match:
                 continue
             tid = tid_match.group(1)
             url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/"
-
-            # タイトル
             title_match = re.search(r'<div class="oneliner title"[^>]*>(.*?)</div>', block, re.DOTALL)
             title = html.unescape(title_match.group(1)).strip() if title_match else "(no title)"
-
-            # レス数
             count_match = re.search(r'<span class="num_of_item">(\d+)</span>', block)
             count = int(count_match.group(1)) if count_match else 0
-
             threads.append({"url": url, "title": title, "count": count})
-
     print(f"▶ Fetched {len(threads)} threads")
     return threads
 
@@ -86,8 +76,8 @@ def save_history(history):
 def fetch_thread_text(url):
     text = ""
     for i in range(1, 6):
-        html = requests.get(f"{url}?page={i}").text
-        posts = re.findall(r'<p itemprop="commentText">([\s\S]*?)</p>', html)
+        html_page = requests.get(f"{url}?page={i}").text
+        posts = re.findall(r'<p itemprop="commentText">([\s\S]*?)</p>', html_page)
         for post in posts:
             plain = re.sub(r'<[^>]+>', '', post).replace('\u3000', ' ').strip()
             text += plain + "\n"
