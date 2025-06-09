@@ -46,29 +46,32 @@ def fetch_threads():
             print(f"▶ ERROR: Failed to fetch page {page}")
             continue
 
-        blocks = re.findall(r'<div class="list_item detail">(.*?)</div>\s*</div>', res.text, re.DOTALL)
+        # <a href=...> ～ </a> の中に各スレッドブロックがある
+        blocks = re.findall(r'<a href="/bbs/thread/\d+/".*?</a>', res.text, re.DOTALL)
         print(f"▶ Found {len(blocks)} thread blocks")
 
         for block in blocks:
             tid_match = re.search(r'/bbs/thread/(\d+)/', block)
-            title_match = re.search(r'<div class="oneliner title"[^>]*>(.*?)</div>', block, re.DOTALL)
-            count_match = re.search(r'<span class="num_of_item">(\d+)</span>', block)
-
             if not tid_match:
                 print("▶ WARN: thread ID not found")
                 continue
-
             tid = tid_match.group(1)
             thread_url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/"
+
+            title_match = re.search(r'<div class="oneliner title"[^>]*>(.*?)</div>', block, re.DOTALL)
             title = html.unescape(title_match.group(1)).strip() if title_match else "(no title)"
+
+            count_match = re.search(r'<span class="num_of_item">(\d+)</span>', block)
             count = int(count_match.group(1)) if count_match else 0
 
-            print(f"▶ Parsed thread: {thread_url} | title: {title} | count: {count}")
-            threads.append({"url": thread_url, "title": title, "count": count})
+            threads.append({
+                "url": thread_url,
+                "title": title,
+                "count": count
+            })
 
     print(f"▶ Fetched {len(threads)} threads")
     return threads
-
 
 def load_history():
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
