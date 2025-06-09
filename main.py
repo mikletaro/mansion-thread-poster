@@ -8,7 +8,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 import html
 import json
-import requests
 from bs4 import BeautifulSoup
 import time
 
@@ -35,7 +34,6 @@ CANDIDATE_SHEET = "投稿候補"
 POST_SHEET = "投稿予定"
 MAX_PAGES = 3
 POST_COUNT = 14
-
 
 def fetch_threads():
     threads = []
@@ -69,6 +67,7 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
 
     for page in range(1, max_pages + 1):
         url = base_url + str(page)
+        print(f"▶ Fetching thread page: {url}")
         try:
             resp = requests.get(url, headers=headers, timeout=10)
             resp.raise_for_status()
@@ -89,11 +88,14 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
 
     return posts
 
+def fetch_thread_text(url):
+    thread_id = re.search(r'/thread/(\d+)/', url).group(1)
+    return "\n".join(fetch_thread_posts(thread_id))
+
 def load_history():
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
     data = sheet.get_all_values()[1:]
     return {row[0]: int(row[1]) for row in data if len(row) > 1 and row[1].isdigit()}
-
 
 def save_history(history):
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
@@ -101,21 +103,6 @@ def save_history(history):
     sheet.clear()
     sheet.append_row(["URL", "取得時レス数", "最終取得日"])
     sheet.append_rows(rows)
-
-
-def fetch_thread_text(url):
-    text = ""
-    for i in range(1, 6):
-        page_url = f"{url}?page={i}"
-        print(f"▶ Fetching thread page: {page_url}")
-        html_page = requests.get(page_url).text
-        posts = re.findall(r'<p itemprop="commentText">([\s\S]*?)</p>', html_page)
-        print(f"▶ Found {len(posts)} posts on page {i}")
-        for post in posts:
-            plain = re.sub(r'<[^>]+>', '', post).replace('\u3000', ' ').strip()
-            text += plain + "\n"
-    return text
-
 
 def judge_risk(text):
     try:
@@ -149,7 +136,6 @@ def judge_risk(text):
     except Exception as e:
         return "不明", f"[Error] {str(e)}", "NG"
 
-
 def generate_summary(text):
     prompt = f"""
 以下は掲示板の書き込み内容です。内容を120文字以内で自然な1文にしてください。前置き・要点整理・説明は禁止です。
@@ -167,7 +153,6 @@ def generate_summary(text):
     }
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
     return res.json()["content"][0]["text"].strip()
-
 
 def main():
     threads = fetch_threads()
@@ -191,13 +176,30 @@ def main():
     print(f"▶ Selected top {len(top_diffs)} threads for risk check")
 
     candidates = []
+    seen = set()
     updated = {}
 
     for t in top_diffs:
         print(f"▶ Fetching thread text and judging risk for: {t['title']}")
+        thread_id = re.search(r'/thread/(\d+)/', t["url"]).group(1)
+        if thread_id in seen:
+            continue
+        seen.add(thread_id)
+
         text = fetch_thread_text(t["url"])
+        if not text.strip():
+            print(f"▶ No posts found for thread {t['title']} — skipping.")
+            continue
+
         risk, comment, flag = judge_risk(text)
-        candidates.append({"url": t["url"], "diff": t["diff"], "title": t["title"], "risk": risk, "comment": comment, "flag": flag})
+        candidates.append({
+            "url": t["url"],
+            "diff": t["diff"],
+            "title": t["title"],
+            "risk": risk,
+            "comment": comment,
+            "flag": flag
+        })
         updated[t["url"]] = t["count"]
 
     print(f"▶ All candidates: {len(candidates)} 件")
@@ -225,13 +227,12 @@ def main():
 
     for i, c in enumerate(ok_candidates):
         post_date = today + datetime.timedelta(days=1 + i // 2)
-        time = "8:00" if i % 2 == 0 else "15:00"
+        time_str = "8:00" if i % 2 == 0 else "15:00"
         summary = generate_summary(fetch_thread_text(c["url"]))
         thread_id = re.search(r'(\d+)/$', c["url"]).group(1)
         utm = f"?utm_source=x&utm_medium=em-{thread_id}&utm_campaign={post_date.strftime('%Y%m%d')}"
         post_text = f"{summary}\n#マンションコミュニティ\n{c['url']}{utm}"
-        post_sheet.append_row([post_date.strftime("%Y/%m/%d"), time, post_text, "FALSE", c["url"]])
-
+        post_sheet.append_row([post_date.strftime("%Y/%m/%d"), time_str, post_text, "FALSE", c["url"]])
 
 if __name__ == "__main__":
     main()
