@@ -5,11 +5,17 @@ import re
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
+import json
 
 SPREADSHEET_ID = os.environ['SPREADSHEET_ID']
 CLAUDE_API_KEY = os.environ['CLAUDE_API_KEY']
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# service_account.json をシークレットから復元
+with open("service_account.json", "w") as f:
+    f.write(os.environ['GCP_SERVICE_ACCOUNT_JSON'])
+
 CREDS = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
 GC = gspread.authorize(CREDS)
 
