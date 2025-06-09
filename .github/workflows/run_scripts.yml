@@ -19,17 +19,18 @@ jobs:
       TEST_MODE: "1"
       SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
       CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+      GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v3
-
-      - name: Write service_account.json from secret
-        run: echo "${{ secrets.GCP_SERVICE_ACCOUNT }}" > service_account.json
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
+      - name: Write service_account.json from secret
+        run: echo "$GCP_SERVICE_ACCOUNT_JSON" > service_account.json
 
       - name: Install dependencies
         run: |
@@ -42,15 +43,9 @@ jobs:
             python candidate_extractor.py
           elif [ "${{ github.event.inputs.script }}" = "post_to_x" ]; then
             python post_to_x.py
+          else
+            echo "Unknown script selected." && exit 1
           fi
 
       - name: Show done
         run: echo "✅ Done"
-        
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
