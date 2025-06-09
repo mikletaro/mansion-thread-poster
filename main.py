@@ -125,12 +125,12 @@ def judge_risk(text):
         res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
         content = res.json()["content"][0]["text"].strip()
         risk_lines = [line for line in content.splitlines() if line.startswith("リスク：")]
-        risk_line = risk_lines[-1] if risk_lines else ""
-        if "高" in risk_line:
+
+        if any("高" in line for line in risk_lines):
             return "高", content, "NG"
-        elif "低" in risk_line:
+        elif any("低" in line for line in risk_lines):
             return "低", content, "OK"
-        elif "不明" in risk_line:
+        elif any("不明" in line for line in risk_lines):
             return "不明", content, "NG"
         else:
             return "不明", content, "NG"
@@ -139,7 +139,7 @@ def judge_risk(text):
 
 def generate_summary(text):
     prompt = f"""
-以下は掲示板の書き込み内容です。内容を120文字以内で読みたくなるタイトルを考えて、タイトルのみ出力する。前置き・要点整理・説明は禁止です。
+以下は掲示板の書き込み内容です。内容を読んで読みたくなる長いタイトル（120文字以内）をひとつ考えて、タイトルのみ出力する。前置き・要点整理・説明は禁止です。
 {text}
 """
     payload = {
