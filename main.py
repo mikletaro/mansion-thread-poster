@@ -139,7 +139,12 @@ def judge_risk(text):
 
 def generate_summary(text):
     prompt = f"""
-以下は掲示板の書き込み内容です。内容を読んで、読みたくなる長いタイトル（120文字以内）をひとつ考えて、タイトルのみ出力してください。前置き・要点整理・説明・全体を「」で括るのは禁止です。
+以下は掲示板の書き込み内容です。
+この内容から、目を引く自然な日本語タイトルをひとつ考えてください。
+・タイトルのみを出力してください（前置き禁止）
+・「タイトルを提案します」「以下のタイトルです」などは出力しないでください
+・タイトル文を「」で囲まないでください
+・120文字以内に収めてください
 {text}
 """
     payload = {
@@ -155,16 +160,12 @@ def generate_summary(text):
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
     summary = res.json()["content"][0]["text"].strip()
 
+    # 念のため括弧も除去
     if summary.startswith("「") and summary.endswith("」"):
         summary = summary[1:-1]
 
     return summary
 
-def main():
-    threads = fetch_threads()
-    history = load_history()
-    diffs = []
-    seen_ids = set()
 
     for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
         tid = t["id"]
