@@ -53,7 +53,7 @@ def fetch_threads():
             url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/"
             title = html.unescape(title).strip()
             count = int(count)
-            threads.append({"url": url, "title": title, "count": count})
+            threads.append({"url": url, "title": title, "count": count, "id": tid})
     print(f"▶ Fetched {len(threads)} threads")
     return threads
 
@@ -139,7 +139,7 @@ def judge_risk(text):
 
 def generate_summary(text):
     prompt = f"""
-以下は掲示板の書き込み内容です。内容を読んで、読みたくなる長いタイトル（120文字以内）をひとつ考えて、タイトルのみ出力する。前置き・要点整理・説明は禁止です。
+以下は掲示板の書き込み内容です。内容を120文字以内で自然な1文にしてください。前置き・要点整理・説明は禁止です。
 {text}
 """
     payload = {
@@ -164,9 +164,15 @@ def main():
     threads = fetch_threads()
     history = load_history()
     diffs = []
+    seen_ids = set()
 
-    for t in threads:
+    for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
+        tid = t["id"]
         url, title, count = t["url"], t["title"], t["count"]
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
+
         history_count = history.get(url, 0)
         diff = count - history_count
         print(f"▶ Checking: {title} | count: {count}, history: {history_count}, diff: {diff}")
@@ -177,21 +183,16 @@ def main():
             continue
 
         diffs.append({"url": url, "title": title, "diff": diff, "count": count})
+        if len(diffs) == 20:
+            break
 
-    top_diffs = sorted(diffs, key=lambda x: x["diff"], reverse=True)[:20]
-    print(f"▶ Selected top {len(top_diffs)} threads for risk check")
+    print(f"▶ Selected top {len(diffs)} threads for risk check")
 
     candidates = []
-    seen = set()
     updated = {}
 
-    for t in top_diffs:
+    for t in diffs:
         print(f"▶ Fetching thread text and judging risk for: {t['title']}")
-        thread_id = re.search(r'/thread/(\d+)/', t["url"]).group(1)
-        if thread_id in seen:
-            continue
-        seen.add(thread_id)
-
         text = fetch_thread_text(t["url"])
         if not text.strip():
             print(f"▶ No posts found for thread {t['title']} — skipping.")
