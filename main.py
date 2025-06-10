@@ -163,10 +163,17 @@ def generate_summary(text):
     if summary.startswith("「") and summary.endswith("」"):
         summary = summary[1:-1]
 
-    summary = re.sub(r'^.*?[「"](.*?)[」"]$', r'\1', summary)
+    summary = re.sub(r'^.*?[「\"](.*?)[」\"]$', r'\1', summary)
     return summary
 
-    
+# 以下のコードはファイル末尾に追加してください
+
+def main():
+    threads = fetch_threads()
+    history = load_history()
+    seen_ids = set()
+    diffs = []
+
     for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
         tid = t["id"]
         url, title, count = t["url"], t["title"], t["count"]
@@ -240,7 +247,7 @@ def generate_summary(text):
         post_date = today + datetime.timedelta(days=1 + i // 2)
         time_str = "8:00" if i % 2 == 0 else "15:00"
         summary = generate_summary(fetch_thread_text(c["url"]))
-        thread_id = re.search(r'(\d+)/$', c["url"]).group(1)
+        thread_id = re.search(r'(\\d+)/$', c["url"]).group(1)
         utm = f"?utm_source=x&utm_medium=em-{thread_id}&utm_campaign={post_date.strftime('%Y%m%d')}"
         post_text = f"{summary}\n#マンションコミュニティ\n{c['url']}{utm}"
         post_sheet.append_row([post_date.strftime("%Y/%m/%d"), time_str, post_text, "FALSE", c["url"]])
