@@ -163,8 +163,9 @@ def generate_summary(text):
     if summary.startswith("「") and summary.endswith("」"):
         summary = summary[1:-1]
 
-    summary = re.sub(r'^.*?「(.*?)」$', r'\1', summary)  # 不要な文全体を取り除く
-    return summary；
+    summary = re.sub(r'^.*?[「"](.*?)[」"]$', r'\1', summary)
+    return summary
+
     
     for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
         tid = t["id"]
