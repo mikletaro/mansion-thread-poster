@@ -160,13 +160,12 @@ def generate_summary(text):
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
     summary = res.json()["content"][0]["text"].strip()
 
-    # 念のため括弧も除去
     if summary.startswith("「") and summary.endswith("」"):
         summary = summary[1:-1]
 
-    return summary
-
-
+    summary = re.sub(r'^.*?「(.*?)」$', r'\1', summary)  # 不要な文全体を取り除く
+    return summary；
+    
     for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
         tid = t["id"]
         url, title, count = t["url"], t["title"], t["count"]
