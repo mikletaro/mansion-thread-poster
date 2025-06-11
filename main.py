@@ -244,7 +244,7 @@ def main():
         ws_cand.append_row(
             [
                 c["url"],
-                c["count"] - history.get(x["url"], 0),
+                c["count"] - history.get(c["url"], 0),
                 c["title"],
                 c["risk"],
                 c["comment"],
