@@ -40,12 +40,8 @@ def claude_call(prompt,max_tokens):
 # ------------ 3. スクレイパ ------------
 def fetch_threads() -> list[dict]:
     """
-    23区板を MAX_PAGES 分クロールしてスレ情報を返す
-    - Googlebot UA は 2 ページ目以降で 403/429 を受けやすいため
-      一般ブラウザ UA に変更
-    - 各ページ取得は最大 2 回までリトライ
-    - ページ間に 1 秒ディレイを入れてブロックを回避
-    - id 重複は除外
+    23区板を MAX_PAGES 分クロール。
+    BeautifulSoup で anchor 要素を確実にパースして 150件取得を目指す。
     """
     threads, seen_ids = [], set()
     ua = {
@@ -58,45 +54,36 @@ def fetch_threads() -> list[dict]:
 
     for page in range(1, MAX_PAGES + 1):
         url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
+        res = requests.get(url, headers=ua, timeout=30)
+        if res.status_code != 200:
+            print(f"▶ page {page} status={res.status_code} — skip")
+            time.sleep(2)
+            continue
 
-        # ── 最大 2 回だけリトライ ──
-        for attempt in (1, 2):
-            try:
-                res = requests.get(url, headers=ua, timeout=30)
-                if res.status_code == 200:
-                    break
-                print(f"▶ page {page} status={res.status_code} retry {attempt}")
-            except requests.RequestException as e:
-                print(f"▶ page {page} error {e} retry {attempt}")
-
-            time.sleep(2)            # ブロック緩和待ち
-        else:
-            print(f"▶ page {page} スキップ")
-            continue                 # 次のページへ
-
-        # ── スレッド抽出 ──
-        for tid, cnt, ttl in re.findall(
-            r'<a href="/bbs/thread/(\d+)/"[^>]*>.*?'
-            r'<span class="num_of_item">(\d+)</span>.*?'
-            r'<div class="oneliner title"[^>]*>(.*?)</div>',
-            res.text,
-            re.S,
-        ):
-            if tid in seen_ids:      # id 重複回避
+        soup = BeautifulSoup(res.text, "html.parser")
+        for a in soup.select("a.component_thread_list_item"):
+            tid = re.search(r"/thread/(\d+)/", a["href"]).group(1)
+            if tid in seen_ids:
                 continue
             seen_ids.add(tid)
+
+            count_tag  = a.select_one("span.num_of_item")
+            title_tag  = a.select_one("div.oneliner.title")
+            count = int(count_tag.get_text(strip=True)) if count_tag else 0
+            title = html.unescape(title_tag.get_text(strip=True)) if title_tag else "タイトル取得失敗"
+
             threads.append(
                 {
                     "url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
                     "id": tid,
-                    "title": html.unescape(ttl).strip(),
-                    "count": int(cnt),
+                    "title": title,
+                    "count": count,
                 }
             )
-
         time.sleep(1)  # ページ間ディレイ
 
     return threads
+
 
 def fetch_thread_text(url,pages=3):
     tid=re.search(r'/thread/(\d+)/',url).group(1)
@@ -251,13 +238,13 @@ def main():
     )
     for c in sorted(
         candidates,
-        key=lambda x: x["count"] - history.get(c["url"], 0),
+        key=lambda x: x["count"] - history.get(x["url"], 0),
         reverse=True,
     ):
         ws_cand.append_row(
             [
                 c["url"],
-                c["count"] - history.get(c["url"], 0),
+                c["count"] - history.get(x["url"], 0),
                 c["title"],
                 c["risk"],
                 c["comment"],
