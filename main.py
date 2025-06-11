@@ -215,14 +215,10 @@ def main():
         key=lambda x: x["count"] - history.get(x["url"], 0),
         reverse=True,
     ):
-        # ---- 新規スレは無条件に除外 ----
-        if t["url"] not in history:
+        if t["url"] not in history:                         # 新規スレは除外
             continue
-
-        # ---- 差分がないスレも除外 ----
-        if t["count"] - history[t["url"]] <= 0:
+        if t["count"] - history[t["url"]] <= 0:             # 差分なしは除外
             continue
-
         diffs.append(t)
         if len(diffs) == 25:
             break
@@ -262,7 +258,7 @@ def main():
         )
     print(f"▶ 投稿候補シート更新 = {len(candidates)} 行")
 
-    # 4. 投稿予定シート
+    # 4. 投稿予定シート（最大 14 行・7 日均等配置）
     ws_post = gc.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     ws_post.clear()
     ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
@@ -275,6 +271,7 @@ def main():
         if c["url"] in scheduled:
             continue
 
+        # タイトル生成（NOK リトライ）
         title = "NOK"
         for _ in range(MAX_EXTRA_RETRY + 1):
             title = generate_summary(fetch_thread_text(c["url"]))
@@ -283,13 +280,14 @@ def main():
         if title.upper() == "NOK":
             continue
 
-        post_date = base_monday + datetime.timedelta(days=row_count // 2)
-        time_str = "8:00" if row_count % 2 == 0 else "15:00"
+        # 7 日 × 2 枠に均等配置
+        day_offset = row_count % 7
+        post_date = base_monday + datetime.timedelta(days=day_offset)
+        time_str = "8:00" if row_count // 7 == 0 else "15:00"
+
+        # 投稿テキスト生成
         tid = re.search(r"/thread/(\d+)/", c["url"]).group(1)
-        utm = (
-            f"?utm_source=x&utm_medium=em-{tid}"
-            f"&utm_campaign={post_date:%Y%m%d}"
-        )
+        utm = f"?utm_source=x&utm_medium=em-{tid}&utm_campaign={post_date:%Y%m%d}"
         post_txt = f"{title}\n#マンションコミュニティ\n{c['url']}{utm}"
 
         ws_post.append_row(
@@ -303,7 +301,7 @@ def main():
         )
         scheduled.add(c["url"])
         row_count += 1
-        if row_count == POST_COUNT:
+        if row_count == POST_COUNT:          # 14 行で終了
             break
     print(f"▶ 投稿行数   = {row_count}")
 
