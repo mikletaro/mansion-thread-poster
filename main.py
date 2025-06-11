@@ -20,7 +20,7 @@ MAX_PAGES, POST_COUNT = 3, 14
 MAX_RETRY_BASE, MAX_EXTRA_RETRY = 3, 5
 
 HISTORY_SHEET, CANDIDATE_SHEET, POST_SHEET = "スレ履歴", "投稿候補", "投稿予定"
-BANNED_WORDS = ["意味不明","共産主義","中国人","血税","糞尿","悩む","スケベ","低俗","トラブル","酷い","劣等感"]
+BANNED_WORDS = ["意味不明","共産主義","中国人","血税","糞尿","悩む","スケベ","低俗","トラブル","酷い","劣等感","三流","タイトル"]
 MAX_TITLE_LEN   = 90
 
 # ------------ 1. Google 認証 ------------
