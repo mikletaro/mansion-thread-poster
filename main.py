@@ -24,7 +24,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 MAX_PAGES        = 3
 POST_COUNT       = 14
 MAX_RETRY_BASE   = 3     # Claude ベースリトライ
-MAX_EXTRA_RETRY  = 2     # タイトル NG 追加リトライ
+MAX_EXTRA_RETRY  = 5     # タイトル NG 追加リトライ
 
 HISTORY_SHEET   = "スレ履歴"
 CANDIDATE_SHEET = "投稿候補"
@@ -228,35 +228,50 @@ def main():
     ok = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
     random.shuffle(ok)
 
-    # 投稿予定シート準備
-    ws_post = gc.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
-    ws_post.clear()
-    ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
+# ─────────────────────────────────────────
+# 5) 投稿予定シートを生成（重複除外 & 14行埋める）
+# ─────────────────────────────────────────
+ws_post = gc.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
+ws_post.clear()
+ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
 
-    today = datetime.date.today()
-    base_monday = today + datetime.timedelta(days=((7 - today.weekday()) % 7 or 7))
-    scheduled = set()                 # ★ 重複URL防止
+today        = datetime.date.today()
+days_ahead   = (7 - today.weekday()) % 7 or 7        # 次の月曜までの日数
+base_monday  = today + datetime.timedelta(days=days_ahead)
 
-    for idx, c in enumerate(ok):
-        if c["url"] in scheduled:
-            continue
-        scheduled.add(c["url"])
+scheduled: set[str] = set()  # URL 重複防止
+row_count = 0                # 追加済み行数
 
-        title = "NOK"
-        for _ in range(MAX_EXTRA_RETRY + 1):
-            title = generate_summary(fetch_thread_text(c["url"]))
-            if title.upper() != "NOK":
-                break
-        if title.upper() == "NOK":
-            continue
+for c in ok:                                  # OK 候補を順番に消化
+    if c["url"] in scheduled:                 # URL 重複チェック
+        continue
 
-        post_date = base_monday + datetime.timedelta(days=idx // 2)
-        time_str  = "8:00" if idx % 2 == 0 else "15:00"
-        tid       = re.search(r'/thread/(\d+)/', c["url"]).group(1)
-        utm       = f"?utm_source=x&utm_medium=em-{tid}&utm_campaign={post_date:%Y%m%d}"
-        post_txt  = f"{title}\n#マンションコミュニティ\n{c['url']}{utm}"
-        ws_post.append_row([post_date.strftime("%Y/%m/%d"), time_str,
-                            post_txt, "FALSE", c["url"]])
+    # ───── タイトル生成（NOK なら追加リトライ） ─────
+    title = "NOK"
+    for _ in range(MAX_EXTRA_RETRY + 1):      # MAX_EXTRA_RETRY = 5
+        title = generate_summary(fetch_thread_text(c["url"]))
+        if title.upper() != "NOK":
+            break
+    if title.upper() == "NOK":                # 失敗したら次の候補へ
+        continue
+
+    # ───── 投稿日時を決定 ─────
+    post_date = base_monday + datetime.timedelta(days=row_count // 2)
+    time_str  = "8:00" if row_count % 2 == 0 else "15:00"
+
+    # ───── 投稿文を組み立て ─────
+    tid  = re.search(r'/thread/(\d+)/', c["url"]).group(1)
+    utm  = f"?utm_source=x&utm_medium=em-{tid}&utm_campaign={post_date:%Y%m%d}"
+    post_txt = f"{title}\n#マンションコミュニティ\n{c['url']}{utm}"
+
+    # ───── シートに書き込み ─────
+    ws_post.append_row([post_date.strftime("%Y/%m/%d"),
+                        time_str, post_txt, "FALSE", c["url"]])
+    scheduled.add(c["url"])
+    row_count += 1
+
+    if row_count == POST_COUNT:               # 14 行埋まったら終了
+        break
 
     # 履歴保存（TEST_MODE=1 のときはスキップ）
     if os.getenv("TEST_MODE") != "1":
