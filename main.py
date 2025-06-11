@@ -139,19 +139,19 @@ def judge_risk(text: str):
         return "不明", f"[Error] {e}", "NG"
 
 # ----------------------------------------------------------------------
-# 6. タイトル生成 (Claude)  ― NOK で失敗通知
+# 6. タイトル生成 (Claude)  ― NOK で失敗通知 & API エラー回避
 # ----------------------------------------------------------------------
 def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
     base_prompt = f"""
 あなたは掲示板スレッドの要約ライターです。
-
+### 手順
+1. 禁止語リストにある語句を含めず、目を引く長い日本語タイトルを1つ作成する。  
+2. 出力はタイトルのみ。120文字以内。括弧や前置き語句は禁止。
 ### 出力仕様
 - 最終出力は **タイトル文字列のみ**。前置き・改行・かぎ括弧・接頭辞は禁止。
 - 禁止語を 1 語でも含んだ場合は **NOK** とだけ返す。
-
 ### 禁止語リスト
 意味不明, 共産主義, 中国人, 血税, 糞尿, 悩む, スケベ, 低俗, トラブル, 酷い, 劣等感
-
 --- 本文 ---
 {text}"""
     hdrs = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
@@ -163,20 +163,35 @@ def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
             "max_tokens": 100,
             "messages": [{"role": "user", "content": base_prompt}]
         }
-        res   = requests.post("https://api.anthropic.com/v1/messages", headers=hdrs, json=body, timeout=30)
-        title = res.json()["content"][0]["text"].strip()
+        try:
+            res = requests.post("https://api.anthropic.com/v1/messages",
+                                headers=hdrs, json=body, timeout=40)
+            if res.status_code != 200:
+                print(f"▶ Claude HTTP {res.status_code}: retry {i}/{max_retry}")
+                time.sleep(3)
+                continue
+            data = res.json()
+            if "content" not in data:
+                print(f"▶ Claude JSON without 'content': retry {i}/{max_retry}")
+                time.sleep(3)
+                continue
+            title = data["content"][0]["text"].strip()
+        except Exception as e:
+            print(f"▶ Claude request error: {e}  retry {i}/{max_retry}")
+            time.sleep(3)
+            continue
 
-        # 「タイトル:」「タイトル：」等を除去
+        # 「タイトル:」「タイトル：」など先頭除去
         title = re.sub(r'^\s*タイトル[:：]\s*', '', title)
-        # かぎ括弧の自動除去
+        # かぎ括弧除去
         if title.startswith(("「", "\"", "『")) and title.endswith(("」", "\"", "』")):
             title = title[1:-1]
         title = re.sub(r'^.*?[「"](.*?)[」"]$', r'\1', title)
 
         if title.upper() != "NOK" and not contains_banned(BANNED_WORDS, title):
             return title  # 成功
-        time.sleep(1)    # 次の試行まで待機
-    return "NOK"         # すべて失敗
+        time.sleep(1)  # 次ループへ
+    return "NOK"
 
 # ----------------------------------------------------------------------
 # 7. メイン
@@ -189,7 +204,7 @@ def main():
     diffs     = []
 
     # 差分レス数上位 20 スレ抽出
-    for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
+    for t in sorted(threads, key=lambda x: x["count"] - history.get(t["url"], 0), reverse=True):
         if t["id"] in seen_ids:
             continue
         seen_ids.add(t["id"])
