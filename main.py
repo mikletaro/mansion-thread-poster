@@ -120,7 +120,7 @@ def save_history(hist: dict[str, int]):
 # ----------------------------------------------------------------------
 def judge_risk(text: str):
     prompt = f"""以下は掲示板の書き込みです。炎上リスクを判定し、
-最初に「リスク：高」「リスク：低」「リスク：不明」のいずれかを明示し、簡潔な根拠を述べてください。
+最初に「リスク：高」または「リスク：低」のいずれかを明示し、簡潔な根拠を述べてください。
 --- 本文 ---
 {text}"""
     payload = {
@@ -129,23 +129,34 @@ def judge_risk(text: str):
         "max_tokens": 300,
         "messages": [{"role": "user", "content": prompt}]
     }
-    hdrs = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
+    headers = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
+
     try:
-        res = requests.post("https://api.anthropic.com/v1/messages", headers=hdrs, json=payload, timeout=45)
+        res = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=payload,
+            timeout=45
+        )
         msg = res.json()["content"][0]["text"].strip()
-        risk = "高" if "リスク：高" in msg else ("低" if "リスク：低" in msg else "不明")
-        return risk, msg, ("NG" if risk == "高" else "OK")
+
+        # 2 段階判定
+        risk = "高" if "リスク：高" in msg else "低"
+        flag = "NG" if risk == "高" else "OK"
+
+        return risk, msg, flag
     except Exception as e:
-        return "不明", f"[Error] {e}", "NG"
+        # API エラー時は保守的に高リスク扱い
+        return "高", f"[Error] {e}", "NG"
 
 # ----------------------------------------------------------------------
 # 6. タイトル生成 (Claude)  ― NOK で失敗通知 & API エラー回避
 # ----------------------------------------------------------------------
 def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
     base_prompt = f"""
-あなたは掲示板スレッドの要約ライターです。
+本文をよく読んでその内容に前向きなタイトルをつけてください
 ### 手順
-1. 禁止語リストにある語句を含めず、目を引く長い日本語タイトルを1つ作成する。  
+1. 禁止語リストにある語句を含めず、魅力的で長い日本語タイトルを1つ作成する。  
 2. 出力はタイトルのみ。120文字以内。括弧や前置き語句は禁止。
 ### 出力仕様
 - 最終出力は **タイトル文字列のみ**。前置き・改行・かぎ括弧・接頭辞は禁止。
