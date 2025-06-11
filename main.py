@@ -40,8 +40,9 @@ def claude_call(prompt,max_tokens):
 # ------------ 3. スクレイパ ------------
 def fetch_threads() -> list[dict]:
     """
-    23区板を MAX_PAGES 分クロール。
-    BeautifulSoup で anchor 要素を確実にパースして 150件取得を目指す。
+    23区板を MAX_PAGES 分クロール（重複 ID 除外）。
+    - 403/429 が返ったら指数バックオフで 2 回まで再試行
+    - ページ間の待機時間を 2 秒に延長
     """
     threads, seen_ids = [], set()
     ua = {
@@ -54,10 +55,23 @@ def fetch_threads() -> list[dict]:
 
     for page in range(1, MAX_PAGES + 1):
         url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
-        res = requests.get(url, headers=ua, timeout=30)
-        if res.status_code != 200:
-            print(f"▶ page {page} status={res.status_code} — skip")
-            time.sleep(2)
+
+        # ---- 最大 3 回まで指数バックオフでリトライ ----
+        success = False
+        for retry in range(3):
+            try:
+                res = requests.get(url, headers=ua, timeout=30)
+                if res.status_code == 200:
+                    success = True
+                    break
+                print(f"▶ page{page} status={res.status_code} retry={retry+1}")
+            except requests.RequestException as e:
+                print(f"▶ page{page} error={e} retry={retry+1}")
+
+            time.sleep(2 ** (retry + 1))   # 2s → 4s → 8s
+
+        if not success:
+            print(f"▶ page{page} 取得失敗、スキップ")
             continue
 
         soup = BeautifulSoup(res.text, "html.parser")
@@ -67,23 +81,18 @@ def fetch_threads() -> list[dict]:
                 continue
             seen_ids.add(tid)
 
-            count_tag  = a.select_one("span.num_of_item")
-            title_tag  = a.select_one("div.oneliner.title")
+            count_tag = a.select_one("span.num_of_item")
+            title_tag = a.select_one("div.oneliner.title")
             count = int(count_tag.get_text(strip=True)) if count_tag else 0
             title = html.unescape(title_tag.get_text(strip=True)) if title_tag else "タイトル取得失敗"
 
             threads.append(
-                {
-                    "url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
-                    "id": tid,
-                    "title": title,
-                    "count": count,
-                }
-            )
-        time.sleep(1)  # ページ間ディレイ
+                {"url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
+                 "id": tid, "title": title, "count": count})
+
+        time.sleep(2)   # ページ間ディレイを 2 秒に
 
     return threads
-
 
 def fetch_thread_text(url,pages=3):
     tid=re.search(r'/thread/(\d+)/',url).group(1)
