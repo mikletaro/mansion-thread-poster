@@ -219,10 +219,14 @@ def main():
         key=lambda x: x["count"] - history.get(x["url"], 0),
         reverse=True,
     ):
-        if t["url"] in history and t["count"] - history[t["url"]] <= 0:
+        # ---- 新規スレは無条件に除外 ----
+        if t["url"] not in history:
             continue
-        if t["url"] not in history and t["count"] < 100:
+
+        # ---- 差分がないスレも除外 ----
+        if t["count"] - history[t["url"]] <= 0:
             continue
+
         diffs.append(t)
         if len(diffs) == 25:
             break
@@ -239,23 +243,22 @@ def main():
     random.shuffle(ok)
     print(f"▶ OK候補     = {len(ok)}")
 
-    # 3. 投稿候補シートを更新（C列＝掲示板タイトル）
+    # 3. 投稿候補シートを更新
     ws_cand = gc.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     ws_cand.clear()
     ws_cand.append_row(
         ["URL", "差分レス数", "スレッドタイトル", "炎上リスク", "コメント", "投稿可否"]
     )
-
     for c in sorted(
         candidates,
-        key=lambda x: x["count"] - history.get(x["url"], 0),
+        key=lambda x: x["count"] - history.get(c["url"], 0),
         reverse=True,
     ):
         ws_cand.append_row(
             [
                 c["url"],
                 c["count"] - history.get(c["url"], 0),
-                c["title"],          # ← 掲示板のタイトルをそのまま
+                c["title"],
                 c["risk"],
                 c["comment"],
                 c["flag"],
@@ -263,7 +266,7 @@ def main():
         )
     print(f"▶ 投稿候補シート更新 = {len(candidates)} 行")
 
-    # 4. 投稿予定シート（重複除外 & 14 行埋め）
+    # 4. 投稿予定シート
     ws_post = gc.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     ws_post.clear()
     ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
@@ -308,9 +311,10 @@ def main():
             break
     print(f"▶ 投稿行数   = {row_count}")
 
-    # 5. 履歴更新（TEST_MODE=1 時はスキップ）
+    # 5. 履歴更新
     if os.getenv("TEST_MODE") != "1":
         save_history({**history, **{u: updated[u] for u in scheduled}})
+
     print("▶ Done")
 
 # ------------ 7. 実行 ------------
