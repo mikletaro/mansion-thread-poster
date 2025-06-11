@@ -62,9 +62,7 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     }
-
     posts = []
-
     for page in range(1, max_pages + 1):
         url = base_url + str(page)
         print(f"▶ Fetching thread page: {url}")
@@ -74,18 +72,14 @@ def fetch_thread_posts(thread_id: str, max_pages: int = 5, delay_sec: float = 1.
         except requests.RequestException as e:
             print(f"▶ Error fetching page {page} of thread {thread_id}: {e}")
             continue
-
         soup = BeautifulSoup(resp.text, 'html.parser')
         comment_tags = soup.select('p[itemprop="commentText"]')
         print(f"▶ Found {len(comment_tags)} posts on page {page}")
-
         for tag in comment_tags:
             text = tag.get_text(strip=True)
             if text:
                 posts.append(text)
-
         time.sleep(delay_sec)
-
     return posts
 
 def fetch_thread_text(url):
@@ -125,15 +119,12 @@ def judge_risk(text):
         res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
         content = res.json()["content"][0]["text"].strip()
         risk_lines = [line for line in content.splitlines() if line.startswith("リスク：")]
-
         if any("高" in line for line in risk_lines):
             risk = "高"
         else:
             risk = "低"
-
         flag = "NG" if risk == "高" else "OK"
         return risk, content, flag
-
     except Exception as e:
         return "高", f"[Error] {str(e)}", "NG"
 
@@ -159,16 +150,13 @@ def generate_summary(text):
     }
     res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
     summary = res.json()["content"][0]["text"].strip()
-
     if summary.startswith("「") and summary.endswith("」"):
         summary = summary[1:-1]
-
-    summary = re.sub(r'^.*?[「\"](.*?)[」\"]$', r'\1', summary)
+    summary = re.sub(r'^.*?[「"](.*?)[」"]$', r'\1', summary)
     return summary
 
-# 以下のコードはファイル末尾に追加してください
-
 def main():
+    print("▶ main() started")
     threads = fetch_threads()
     history = load_history()
     seen_ids = set()
@@ -195,17 +183,14 @@ def main():
             break
 
     print(f"▶ Selected top {len(diffs)} threads for risk check")
-
     candidates = []
     updated = {}
-
     for t in diffs:
         print(f"▶ Fetching thread text and judging risk for: {t['title']}")
         text = fetch_thread_text(t["url"])
         if not text.strip():
             print(f"▶ No posts found for thread {t['title']} — skipping.")
             continue
-
         risk, comment, flag = judge_risk(text)
         candidates.append({
             "url": t["url"],
@@ -242,12 +227,11 @@ def main():
     post_sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     post_sheet.clear()
     post_sheet.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
-
     for i, c in enumerate(ok_candidates):
         post_date = today + datetime.timedelta(days=1 + i // 2)
         time_str = "8:00" if i % 2 == 0 else "15:00"
         summary = generate_summary(fetch_thread_text(c["url"]))
-        thread_id = re.search(r'(\\d+)/$', c["url"]).group(1)
+        thread_id = re.search(r'/thread/(\d+)/', c["url"]).group(1)
         utm = f"?utm_source=x&utm_medium=em-{thread_id}&utm_campaign={post_date.strftime('%Y%m%d')}"
         post_text = f"{summary}\n#マンションコミュニティ\n{c['url']}{utm}"
         post_sheet.append_row([post_date.strftime("%Y/%m/%d"), time_str, post_text, "FALSE", c["url"]])
