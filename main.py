@@ -21,7 +21,7 @@ MAX_RETRY_BASE, MAX_EXTRA_RETRY = 3, 5
 
 HISTORY_SHEET, CANDIDATE_SHEET, POST_SHEET = "スレ履歴", "投稿候補", "投稿予定"
 BANNED_WORDS = ["意味不明","共産主義","中国人","血税","糞尿","悩む","スケベ","低俗","トラブル","酷い","劣等感"]
-CTA = " 詳しくはこちら👇"; MAX_TITLE_LEN = 90 - len(CTA)
+MAX_TITLE_LEN   = 90
 
 # ------------ 1. Google 認証 ------------
 sa = base64.b64decode(os.environ["GCP_SERVICE_ACCOUNT_B64"])
@@ -197,7 +197,7 @@ def generate_summary(text,max_retry=MAX_RETRY_BASE):
         t=re.sub(r'^.*?[「"](.*?)[」"]$',r'\1',t)
         if contains_banned(BANNED_WORDS,t): time.sleep(1); continue
         if len(t)>MAX_TITLE_LEN: t=t[:MAX_TITLE_LEN].rstrip("、,。. ")+"…"
-        return t+CTA
+        return t
     return "NOK"
 
 # ------------ 6. メイン ------------
