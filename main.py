@@ -1,123 +1,152 @@
+"""
+マンションコミュニティ自動投稿スクリプト
+"""
+
 import os
 import base64
 import datetime
 import random
 import re
+import time
 import requests
-import gspread
-from google.oauth2.service_account import Credentials
 import html
 from bs4 import BeautifulSoup
-import time
+import gspread
+from google.oauth2.service_account import Credentials
 
-# ----------------------------------------------------------------------
-# 0. 基本設定
-# ----------------------------------------------------------------------
+# ──────────────────────────────
+# 0. 環境設定
+# ──────────────────────────────
 print(f"▶ TEST_MODE: {os.getenv('TEST_MODE')}")
 
-SPREADSHEET_ID  = os.environ['SPREADSHEET_ID']
-CLAUDE_API_KEY  = os.environ['CLAUDE_API_KEY']
-SCOPES          = ["https://www.googleapis.com/auth/spreadsheets"]
+SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
+CLAUDE_API_KEY = os.environ["CLAUDE_API_KEY"]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-MAX_PAGES        = 3     # スレ一覧を巡回する最大ページ
-POST_COUNT       = 14    # 投稿候補として採用するスレッド数
-MAX_RETRY_BASE   = 3     # generate_summary() 内部リトライ回数
-MAX_EXTRA_RETRY  = 2     # "NOK"/禁止語の追加リトライ回数
+MAX_PAGES = 3
+POST_COUNT = 14
+MAX_RETRY_BASE = 3          # Claude ベースリトライ
+MAX_EXTRA_RETRY = 2         # タイトル NG 追加リトライ
 
-HISTORY_SHEET    = "スレ履歴"
-CANDIDATE_SHEET  = "投稿候補"
-POST_SHEET       = "投稿予定"
+HISTORY_SHEET = "スレ履歴"
+CANDIDATE_SHEET = "投稿候補"
+POST_SHEET = "投稿予定"
 
-# ----------------------------------------------------------------------
-# 1. Google 認証
-# ----------------------------------------------------------------------
-print("▶ Decoding GCP_SERVICE_ACCOUNT_B64...")
-json_bytes = base64.b64decode(os.environ['GCP_SERVICE_ACCOUNT_B64'])
-with open("service_account.json", "wb") as f:
-    f.write(json_bytes)
-print("▶ service_account.json written")
-
-print("▶ Authorizing gspread...")
-CREDS = Credentials.from_service_account_file("service_account.json", scopes=SCOPES)
-GC    = gspread.authorize(CREDS)
-print("▶ gspread authorized")
-
-# ----------------------------------------------------------------------
-# 2. 禁止語リスト
-# ----------------------------------------------------------------------
 BANNED_WORDS = [
     "意味不明", "共産主義", "中国人", "血税", "糞尿",
-    "悩む", "スケベ", "低俗", "トラブル", "酷い", "劣等感", "三流", "タイトル"
+    "悩む", "スケベ", "低俗", "トラブル", "酷い", "劣等感"
 ]
+
+CTA = " 詳しくはこちら👇"
+MAX_TITLE_LEN = 90 - len(CTA)  # → 83 文字
+
+# ──────────────────────────────
+# 1. Google 認証
+# ──────────────────────────────
+print("▶ Decoding GCP_SERVICE_ACCOUNT_B64 …")
+json_bytes = base64.b64decode(os.environ["GCP_SERVICE_ACCOUNT_B64"])
+with open("service_account.json", "wb") as f:
+    f.write(json_bytes)
+
+CREDS = Credentials.from_service_account_file(
+    "service_account.json", scopes=SCOPES)
+GC = gspread.authorize(CREDS)
+print("▶ gspread authorized")
+
+# ──────────────────────────────
+# 2. ヘルパ
+# ──────────────────────────────
+
 
 def contains_banned(words: list[str], text: str) -> bool:
     return any(re.search(re.escape(w), text, re.IGNORECASE) for w in words)
 
-# ----------------------------------------------------------------------
-# 3. スレッド取得関連
-# ----------------------------------------------------------------------
+
+# ──────────────────────────────
+# 3. 掲示板スクレイプ
+# ─────────────────────────────-
 def fetch_threads():
     threads = []
-    ua = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
-    for p in range(1, MAX_PAGES + 1):
-        url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={p}"
-        print(f"▶ Fetching list page: {url}")
-        res = requests.get(url, headers=ua, timeout=30)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    }
+    for page in range(1, MAX_PAGES + 1):
+        url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
+        print(f"▶ Fetch list page {page}")
+        res = requests.get(url, headers=headers, timeout=30)
         if res.status_code != 200:
-            print(f"▶ ERROR: status {res.status_code}")
             continue
         blocks = re.findall(
             r'<a href="/bbs/thread/(\d+)/" class="component_thread_list_item link.*?<span class="num_of_item">(\d+)</span>.*?<div class="oneliner title"[^>]*>(.*?)</div>',
-            res.text, re.DOTALL
-        )
+            res.text, re.DOTALL)
         for tid, cnt, ttl in blocks:
             threads.append({
                 "url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
+                "id": tid,
                 "title": html.unescape(ttl).strip(),
-                "count": int(cnt),
-                "id": tid
+                "count": int(cnt)
             })
-        print(f"▶  Page {p}: found {len(blocks)} threads")
     return threads
 
-def fetch_thread_posts(tid: str, max_pages: int = 5, delay: float = 1.0) -> list[str]:
-    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+def fetch_thread_posts(tid: str, max_pages: int = 3, delay=0.3) -> list[str]:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     posts = []
     for p in range(1, max_pages + 1):
         url = f"https://www.e-mansion.co.jp/bbs/thread/{tid}/?page={p}"
         try:
-            r = requests.get(url, headers=ua, timeout=15)
-            r.raise_for_status()
-        except requests.RequestException as e:
-            print(f"▶ Error: {e}")
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+        except requests.RequestException:
             continue
-        soup = BeautifulSoup(r.text, "html.parser")
-        posts += [t.get_text(strip=True) for t in soup.select('p[itemprop="commentText"]') if t.get_text(strip=True)]
+        soup = BeautifulSoup(resp.text, "html.parser")
+        posts += [t.get_text(strip=True)
+                  for t in soup.select('p[itemprop="commentText"]')]
         time.sleep(delay)
-    print(f"▶ Thread {tid}: collected {len(posts)} posts")
     return posts
+
 
 def fetch_thread_text(url: str) -> str:
     tid = re.search(r'/thread/(\d+)/', url).group(1)
     return "\n".join(fetch_thread_posts(tid))
 
-# ----------------------------------------------------------------------
-# 4. スプレッドシート履歴
-# ----------------------------------------------------------------------
+# ──────────────────────────────
+# 4. スプレッドシート I/O
+# ──────────────────────────────
+
+
 def load_history() -> dict[str, int]:
     sheet = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
-    return {r[0]: int(r[1]) for r in sheet.get_all_values()[1:] if len(r) > 1 and r[1].isdigit()}
+    return {r[0]: int(r[1]) for r in sheet.get_all_values()[1:]
+            if len(r) > 1 and r[1].isdigit()}
+
 
 def save_history(hist: dict[str, int]):
     ws = GC.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET)
     ws.clear()
     ws.append_row(["URL", "取得時レス数", "最終取得日"])
-    for url, cnt in hist.items():
-        ws.append_row([url, cnt, datetime.datetime.now().strftime("%Y/%m/%d")])
+    ws.append_rows([[u, c, datetime.date.today().isoformat()]
+                    for u, c in hist.items()])
 
-# ----------------------------------------------------------------------
-# 5. 炎上リスク (2 段階)
-# ----------------------------------------------------------------------
+# ──────────────────────────────
+# 5. Claude API
+# ──────────────────────────────
+
+
+def claude_call(prompt: str, max_tokens: int):
+    headers = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
+    body = {
+        "model": "claude-3-haiku-20240307",
+        "temperature": 0,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    res = requests.post("https://api.anthropic.com/v1/messages",
+                        headers=headers, json=body, timeout=45)
+    res.raise_for_status()
+    return res.json()["content"][0]["text"].strip()
+
+
 def judge_risk(text: str):
     prompt = f"""SNS 炎上リスクのレビューをしてください。
 本文（日本語）について、炎上につながる要素があるか厳格に判定してください。
@@ -138,32 +167,18 @@ def judge_risk(text: str):
 - 2 行目：判定理由（条件番号を明記するとベター）
 - 3 行目以降は何も書かない
 - 条件を満たせない場合は **「ERROR」** とだけ書く
-
 --- 本文 ---
 {text}"""
-    payload = {
-        "model": "claude-3-haiku-20240307",
-        "temperature": 0,
-        "max_tokens": 300,
-        "messages": [{"role": "user", "content": prompt}]
-    }
-    headers = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
     try:
-        res = requests.post("https://api.anthropic.com/v1/messages", headers=headers,
-                            json=payload, timeout=45)
-        msg = res.json()["content"][0]["text"].strip()
+        msg = claude_call(prompt, 200)
         risk = "高" if "リスク：高" in msg else "低"
-        flag = "NG" if risk == "高" else "OK"
-        return risk, msg, flag
+        return risk, msg, ("NG" if risk == "高" else "OK")
     except Exception as e:
         return "高", f"[Error] {e}", "NG"
 
-# ----------------------------------------------------------------------
-# 6. タイトル生成 (NOK / API エラー対策)
-# ----------------------------------------------------------------------
-def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
-    base_prompt = f"""
-あなたは X（旧Twitter）向けのコピーライターです。  
+
+def generate_summary(text: str, max_retry=MAX_RETRY_BASE):
+    base_prompt = f"""あなたは X（旧Twitter）向けのコピーライターです。
 掲示板スレッド本文を読み、読者が続きをクリックしたくなる **前向きで長め** の日本語タイトルを 1 本だけ生成してください。
 ### 出力仕様（必ず守る）
 1. **タイトル本文のみ** を 1 行で出力
@@ -180,121 +195,93 @@ def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
 {', '.join(BANNED_WORDS)}
 --- 本文 ---
 {text}"""
-    headers = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
-
-    for i in range(max_retry + 1):
-        body = {
-            "model": "claude-3-haiku-20240307",
-            "temperature": 0,
-            "max_tokens": 100,
-            "messages": [{"role": "user", "content": base_prompt}]
-        }
+    for _ in range(max_retry + 1):
         try:
-            res = requests.post("https://api.anthropic.com/v1/messages",
-                                headers=headers, json=body, timeout=40)
-            if res.status_code != 200:
-                print(f"▶ Claude HTTP {res.status_code}: retry {i}/{max_retry}")
-                time.sleep(3)
-                continue
-            data = res.json()
-            if "content" not in data:
-                print(f"▶ Claude JSON without 'content': retry {i}/{max_retry}")
-                time.sleep(3)
-                continue
-            title = data["content"][0]["text"].strip()
-        except Exception as e:
-            print(f"▶ Claude request error: {e}  retry {i}/{max_retry}")
-            time.sleep(3)
+            title = claude_call(base_prompt, 80)
+        except Exception:
+            time.sleep(2)
             continue
 
-        # NOK 文章を即 NOK 扱い
         if "NOK" in title.upper():
             return "NOK"
 
+        # 1行化・不要トリム
+        title = re.sub(r'\s+', ' ', title.strip())
         title = re.sub(r'^\s*タイトル[:：]\s*', '', title)
-        if title.startswith(("「", "\"", "『")) and title.endswith(("」", "\"", "』")):
-            title = title[1:-1]
         title = re.sub(r'^.*?[「"](.*?)[」"]$', r'\1', title)
 
-        if not contains_banned(BANNED_WORDS, title):
-            return title
-        time.sleep(1)
+        if contains_banned(BANNED_WORDS, title):
+            time.sleep(1)
+            continue
+        if len(title) > MAX_TITLE_LEN:
+            title = title[:MAX_TITLE_LEN].rstrip("、,。. ") + "…"
+        return title + CTA
     return "NOK"
 
-# ----------------------------------------------------------------------
-# 7. メイン
-# ----------------------------------------------------------------------
+# ──────────────────────────────
+# 6. メイン処理
+# ──────────────────────────────
+
+
 def main():
     print("▶ main() start")
-    threads   = fetch_threads()
-    history   = load_history()
-    seen_ids  = set()
-    diffs     = []
+    threads = fetch_threads()
+    history = load_history()
 
-    for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
-        if t["id"] in seen_ids:
-            continue
-        seen_ids.add(t["id"])
-
-        prev = history.get(t["url"], 0)
-        diff = t["count"] - prev
-        if diff <= 0 and t["url"] in history:
+    # 差分レス数でソートし上位20件
+    diffs = []
+    for t in sorted(threads,
+                    key=lambda x: x["count"] - history.get(x["url"], 0),
+                    reverse=True):
+        if t["url"] in history and t["count"] - history[t["url"]] <= 0:
             continue
         if t["url"] not in history and t["count"] < 100:
             continue
-        diffs.append({**t, "diff": diff})
-        if len(diffs) == 25:
+        diffs.append(t)
+        if len(diffs) == 20:
             break
 
-    candidates, updated = [], {}
+    # リスク判定
+    candidates = []
+    updated = {}
     for d in diffs:
-        text = fetch_thread_text(d["url"])
-        if not text:
-            continue
-        risk, msg, flag = judge_risk(text)
+        txt = fetch_thread_text(d["url"])
+        risk, msg, flag = judge_risk(txt)
         candidates.append({**d, "risk": risk, "comment": msg, "flag": flag})
         updated[d["url"]] = d["count"]
 
     ok = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
     random.shuffle(ok)
 
-    if os.getenv("TEST_MODE") != "1":
-        new_hist = {**history, **{u: updated[u] for u in updated if u in [c["url"] for c in ok]}}
-        save_history(new_hist)
-    else:
-        print("▶ TEST_MODE: history not saved")
-
-    ws_cand = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
-    ws_cand.clear()
-    ws_cand.append_row(["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"])
-    for c in sorted(candidates, key=lambda x: x["diff"], reverse=True):
-        ws_cand.append_row([c["url"], c["diff"], c["title"], c["risk"], c["comment"], c["flag"]])
-
+    # シート更新
     ws_post = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     ws_post.clear()
     ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
 
     today = datetime.date.today()
+    days_ahead = (7 - today.weekday()) % 7 or 7
+    base_monday = today + datetime.timedelta(days=days_ahead)
+
     for idx, c in enumerate(ok):
-        summary = "NOK"
-        for n in range(MAX_EXTRA_RETRY + 1):
-            summary = generate_summary(fetch_thread_text(c["url"]))
-            if summary.upper() != "NOK" and not contains_banned(BANNED_WORDS, summary):
+        title = "NOK"
+        for _ in range(MAX_EXTRA_RETRY + 1):
+            title = generate_summary(fetch_thread_text(c["url"]))
+            if title.upper() != "NOK":
                 break
-            print(f"▶ Extra retry {n+1}/{MAX_EXTRA_RETRY} → {c['title']}")
-        if summary.upper() == "NOK" or contains_banned(BANNED_WORDS, summary):
-            print(f"▶ Skip (still NG): {c['title']}")
+        if title.upper() == "NOK":
             continue
 
-        post_date = today + datetime.timedelta(days=1 + idx // 2)
-        time_str  = "8:00" if idx % 2 == 0 else "15:00"
-        tid       = re.search(r'/thread/(\d+)/', c["url"]).group(1)
-        utm       = f"?utm_source=x&utm_medium=em-{tid}&utm_campaign={post_date.strftime('%Y%m%d')}"
-        post_txt  = f"{summary}\n#マンションコミュニティ\n{c['url']}{utm}"
-        ws_post.append_row([post_date.strftime("%Y/%m/%d"), time_str, post_txt, "FALSE", c["url"]])
+        post_date = base_monday + datetime.timedelta(days=idx // 2)
+        time_str = "8:00" if idx % 2 == 0 else "15:00"
+        tid = re.search(r'/thread/(\d+)/', c["url"]).group(1)
+        utm = f"?utm_source=x&utm_medium=em-{tid}&utm_campaign={post_date:%Y%m%d}"
+        post_txt = f"{title}\n#マンションコミュニティ\n{c['url']}{utm}"
+        ws_post.append_row([post_date.strftime("%Y/%m/%d"),
+                            time_str, post_txt, "FALSE", c["url"]])
 
     print("▶ Done")
 
-# ----------------------------------------------------------------------
+
+# ──────────────────────────────
 if __name__ == "__main__":
     main()
