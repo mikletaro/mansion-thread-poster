@@ -204,7 +204,7 @@ def main():
     diffs     = []
 
     # 差分レス数上位 20 スレ抽出
-    for t in sorted(threads, key=lambda x: x["count"] - history.get(t["url"], 0), reverse=True):
+    for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
         if t["id"] in seen_ids:
             continue
         seen_ids.add(t["id"])
