@@ -152,7 +152,7 @@ def main():
         if t["url"] not in history and t["count"] < 100:
             continue
         diffs.append(t)
-        if len(diffs) == 20:
+        if len(diffs) == 25:
             break
     print(f"▶ 差分候補   = {len(diffs)}")
 
