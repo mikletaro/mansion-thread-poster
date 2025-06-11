@@ -224,7 +224,7 @@ def main():
         if t["url"] not in history and t["count"] < 100:
             continue
         diffs.append({**t, "diff": diff})
-        if len(diffs) == 20:
+        if len(diffs) == 25:
             break
 
     candidates, updated = [], {}
