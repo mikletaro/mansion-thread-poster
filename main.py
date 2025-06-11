@@ -38,17 +38,64 @@ def claude_call(prompt,max_tokens):
     res.raise_for_status(); return res.json()["content"][0]["text"].strip()
 
 # ------------ 3. スクレイパ ------------
-def fetch_threads():
-    threads,seen = [],set()
-    ua={"User-Agent":"Mozilla/5.0 (compatible; Googlebot/2.1; +http://google.com/bot.html)"}
-    for p in range(1,MAX_PAGES+1):
-        r=requests.get(f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={p}",headers=ua,timeout=30)
-        if r.status_code!=200:continue
-        for tid,cnt,ttl in re.findall(r'<a href="/bbs/thread/(\d+)/"[^>]*>.*?<span class="num_of_item">(\d+)</span>.*?<div class="oneliner title"[^>]*>(.*?)</div>',r.text,re.S):
-            if tid in seen: continue
-            seen.add(tid)
-            threads.append({"url":f"https://www.e-mansion.co.jp/bbs/thread/{tid}/","id":tid,
-                            "title":html.unescape(ttl).strip(),"count":int(cnt)})
+def fetch_threads() -> list[dict]:
+    """
+    23区板を MAX_PAGES 分クロールしてスレ情報を返す
+    - Googlebot UA は 2 ページ目以降で 403/429 を受けやすいため
+      一般ブラウザ UA に変更
+    - 各ページ取得は最大 2 回までリトライ
+    - ページ間に 1 秒ディレイを入れてブロックを回避
+    - id 重複は除外
+    """
+    threads, seen_ids = [], set()
+    ua = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+
+    for page in range(1, MAX_PAGES + 1):
+        url = f"https://www.e-mansion.co.jp/bbs/board/23ku/?page={page}"
+
+        # ── 最大 2 回だけリトライ ──
+        for attempt in (1, 2):
+            try:
+                res = requests.get(url, headers=ua, timeout=30)
+                if res.status_code == 200:
+                    break
+                print(f"▶ page {page} status={res.status_code} retry {attempt}")
+            except requests.RequestException as e:
+                print(f"▶ page {page} error {e} retry {attempt}")
+
+            time.sleep(2)            # ブロック緩和待ち
+        else:
+            print(f"▶ page {page} スキップ")
+            continue                 # 次のページへ
+
+        # ── スレッド抽出 ──
+        for tid, cnt, ttl in re.findall(
+            r'<a href="/bbs/thread/(\d+)/"[^>]*>.*?'
+            r'<span class="num_of_item">(\d+)</span>.*?'
+            r'<div class="oneliner title"[^>]*>(.*?)</div>',
+            res.text,
+            re.S,
+        ):
+            if tid in seen_ids:      # id 重複回避
+                continue
+            seen_ids.add(tid)
+            threads.append(
+                {
+                    "url": f"https://www.e-mansion.co.jp/bbs/thread/{tid}/",
+                    "id": tid,
+                    "title": html.unescape(ttl).strip(),
+                    "count": int(cnt),
+                }
+            )
+
+        time.sleep(1)  # ページ間ディレイ
+
     return threads
 
 def fetch_thread_text(url,pages=3):
