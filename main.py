@@ -72,6 +72,8 @@ def fetch_threads():
                             "count": int(cnt)})
     return threads
 
+print(f"▶ 取得スレ数 = {len(threads)}")
+
 def fetch_thread_text(url, pages=3):
     tid = re.search(r'/thread/(\d+)/', url).group(1)
     ua  = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -181,6 +183,8 @@ def main():
     ok = [c for c in candidates if c["flag"]=="OK"][:POST_COUNT]
     random.shuffle(ok)
 
+    print(f"▶ 差分候補   = {len(diffs)}")
+  
     # 投稿予定シート
     ws = gc.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     ws.clear()
@@ -206,10 +210,10 @@ def main():
         ws.append_row([post_date.strftime("%Y/%m/%d"),time_str,post_txt,"FALSE",c["url"]])
         scheduled.add(c["url"]); row_count += 1
         if row_count == POST_COUNT: break
-
+        print(f"▶ OK候補     = {len(ok)}")
     if os.getenv("TEST_MODE") != "1":
         save_history({**history, **{u: updated[u] for u in scheduled}})
-
+        print(f"▶ 投稿行数   = {row_count}")
     print("▶ Done")
 
 # ───── 7. 実行 ─────
