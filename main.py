@@ -111,6 +111,31 @@ def fetch_thread_text(url,pages=3):
         time.sleep(0.3)
     return "\n".join(posts)
 
+def fetch_true_title(url: str) -> str:
+    """
+    スレッド詳細ページから正式タイトルを取得し、
+    『【口コミ掲示板】』プレフィックスと
+    『｜マンション口コミ・評判（…）』サフィックスを除去
+    """
+    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        res = requests.get(url, headers=ua, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        # <title> タグを取得
+        raw = soup.title.get_text(strip=True)
+
+        # ① 先頭の【口コミ掲示板】を削除
+        raw = re.sub(r'^【口コミ掲示板】', '', raw)
+
+        # ② 「｜マンション口コミ・評判」以降をカット
+        raw = re.sub(r'｜マンション口コミ・評判.*$', '', raw)
+
+        return raw.strip()
+    except Exception:
+        return ""
+
 # ------------ 4. Sheet util ------------
 def load_history():
     rows=gc.open_by_key(SPREADSHEET_ID).worksheet(HISTORY_SHEET).get_all_values()[1:]
