@@ -136,21 +136,23 @@ def generate_summary(text,max_retry=MAX_RETRY_BASE):
 def main():
     print("▶ main() start")
 
-    # 1. スレ取得 & 差分抽出
-    threads  = fetch_threads()
+    # 1. スレ抽出 & 差分判定
+    threads = fetch_threads()
     print(f"▶ 取得スレ数 = {len(threads)}")
-    history  = load_history()
+    history = load_history()
 
     diffs = []
-    for t in sorted(threads,
-                    key=lambda x: x["count"] - history.get(x["url"], 0),
-                    reverse=True):
+    for t in sorted(
+        threads,
+        key=lambda x: x["count"] - history.get(x["url"], 0),
+        reverse=True,
+    ):
         if t["url"] in history and t["count"] - history[t["url"]] <= 0:
             continue
         if t["url"] not in history and t["count"] < 100:
             continue
         diffs.append(t)
-        if len(diffs) == 25:
+        if len(diffs) == 20:
             break
     print(f"▶ 差分候補   = {len(diffs)}")
 
@@ -165,34 +167,39 @@ def main():
     random.shuffle(ok)
     print(f"▶ OK候補     = {len(ok)}")
 
-    # 3. 投稿候補シート を更新
+    # 3. 投稿候補シートを更新（C列＝掲示板タイトル）
     ws_cand = gc.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     ws_cand.clear()
     ws_cand.append_row(
-        ["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"]
+        ["URL", "差分レス数", "スレッドタイトル", "炎上リスク", "コメント", "投稿可否"]
     )
-    for c in sorted(candidates,
-                    key=lambda x: x["count"] - history.get(x["url"], 0),
-                    reverse=True):
-        ws_cand.append_row([
-            c["url"],
-            c["count"] - history.get(c["url"], 0),
-            c["title"],
-            c["risk"],
-            c["comment"],
-            c["flag"]
-        ])
+
+    for c in sorted(
+        candidates,
+        key=lambda x: x["count"] - history.get(x["url"], 0),
+        reverse=True,
+    ):
+        ws_cand.append_row(
+            [
+                c["url"],
+                c["count"] - history.get(c["url"], 0),
+                c["title"],          # ← 掲示板のタイトルをそのまま
+                c["risk"],
+                c["comment"],
+                c["flag"],
+            ]
+        )
     print(f"▶ 投稿候補シート更新 = {len(candidates)} 行")
 
-    # 4. 投稿予定シート（重複排除 & 14 行埋め）
+    # 4. 投稿予定シート（重複除外 & 14 行埋め）
     ws_post = gc.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     ws_post.clear()
     ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
 
-    today        = datetime.date.today()
-    base_monday  = today + datetime.timedelta(days=((7 - today.weekday()) % 7 or 7))
-    scheduled, row_count = set(), 0
+    today = datetime.date.today()
+    base_monday = today + datetime.timedelta(days=((7 - today.weekday()) % 7 or 7))
 
+    scheduled, row_count = set(), 0
     for c in ok:
         if c["url"] in scheduled:
             continue
@@ -206,30 +213,32 @@ def main():
             continue
 
         post_date = base_monday + datetime.timedelta(days=row_count // 2)
-        time_str  = "8:00" if row_count % 2 == 0 else "15:00"
-        tid       = re.search(r'/thread/(\d+)/', c["url"]).group(1)
-        utm       = f"?utm_source=x&utm_medium=em-{tid}&utm_campaign={post_date:%Y%m%d}"
-        post_txt  = f"{title}\n#マンションコミュニティ\n{c['url']}{utm}"
+        time_str = "8:00" if row_count % 2 == 0 else "15:00"
+        tid = re.search(r"/thread/(\d+)/", c["url"]).group(1)
+        utm = (
+            f"?utm_source=x&utm_medium=em-{tid}"
+            f"&utm_campaign={post_date:%Y%m%d}"
+        )
+        post_txt = f"{title}\n#マンションコミュニティ\n{c['url']}{utm}"
 
-        ws_post.append_row([
-            post_date.strftime("%Y/%m/%d"),
-            time_str,
-            post_txt,
-            "FALSE",
-            c["url"]
-        ])
-
+        ws_post.append_row(
+            [
+                post_date.strftime("%Y/%m/%d"),
+                time_str,
+                post_txt,
+                "FALSE",
+                c["url"],
+            ]
+        )
         scheduled.add(c["url"])
         row_count += 1
         if row_count == POST_COUNT:
             break
-
     print(f"▶ 投稿行数   = {row_count}")
 
     # 5. 履歴更新（TEST_MODE=1 時はスキップ）
     if os.getenv("TEST_MODE") != "1":
         save_history({**history, **{u: updated[u] for u in scheduled}})
-
     print("▶ Done")
 
 # ------------ 7. 実行 ------------
