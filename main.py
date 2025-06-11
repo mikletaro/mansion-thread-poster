@@ -22,7 +22,7 @@ SCOPES          = ["https://www.googleapis.com/auth/spreadsheets"]
 MAX_PAGES        = 3     # スレ一覧を巡回する最大ページ
 POST_COUNT       = 14    # 投稿候補として採用するスレッド数
 MAX_RETRY_BASE   = 3     # generate_summary() 内部リトライ回数
-MAX_EXTRA_RETRY  = 2     # "NOK"／禁止語が残った場合の追加リトライ回数
+MAX_EXTRA_RETRY  = 2     # "NOK"/禁止語の追加リトライ回数
 
 HISTORY_SHEET    = "スレ履歴"
 CANDIDATE_SHEET  = "投稿候補"
@@ -116,11 +116,10 @@ def save_history(hist: dict[str, int]):
         ws.append_row([url, cnt, datetime.datetime.now().strftime("%Y/%m/%d")])
 
 # ----------------------------------------------------------------------
-# 5. 炎上リスク (Claude)
+# 5. 炎上リスク (2 段階)
 # ----------------------------------------------------------------------
 def judge_risk(text: str):
-    prompt = f"""以下は掲示板の書き込みです。炎上リスクを判定し、
-最初に「リスク：高」または「リスク：低」のいずれかを明示し、簡潔な根拠を述べてください。
+    prompt = f"""以下の掲示板書き込みの炎上リスクを判定し、最初に「リスク：高」または「リスク：低」を明示して根拠を簡潔に述べてください。
 --- 本文 ---
 {text}"""
     payload = {
@@ -130,42 +129,38 @@ def judge_risk(text: str):
         "messages": [{"role": "user", "content": prompt}]
     }
     headers = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
-
     try:
-        res = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers=headers,
-            json=payload,
-            timeout=45
-        )
+        res = requests.post("https://api.anthropic.com/v1/messages", headers=headers,
+                            json=payload, timeout=45)
         msg = res.json()["content"][0]["text"].strip()
-
-        # 2 段階判定
         risk = "高" if "リスク：高" in msg else "低"
         flag = "NG" if risk == "高" else "OK"
-
         return risk, msg, flag
     except Exception as e:
-        # API エラー時は保守的に高リスク扱い
         return "高", f"[Error] {e}", "NG"
 
 # ----------------------------------------------------------------------
-# 6. タイトル生成 (Claude)  ― NOK で失敗通知 & API エラー回避
+# 6. タイトル生成 (NOK / API エラー対策)
 # ----------------------------------------------------------------------
 def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
     base_prompt = f"""
-本文をよく読んでその内容に前向きなタイトルをつけてください
+本文をよく読んでその内容に前向きな長いタイトルをつけてください
 ### 手順
-1. 禁止語リストにある語句を含めず、魅力的で長い日本語タイトルを1つ作成する。  
-2. 出力はタイトルのみ。120文字以内。括弧や前置き語句は禁止。
-### 出力仕様
-- 最終出力は **タイトル文字列のみ**。前置き・改行・かぎ括弧・接頭辞は禁止。
-- 禁止語を 1 語でも含んだ場合は **NOK** とだけ返す。
-### 禁止語リスト
-意味不明, 共産主義, 中国人, 血税, 糞尿, 悩む, スケベ, 低俗, トラブル, 酷い, 劣等感
+1. 禁止語リストにある語句を含めず、魅力的で長い日本語タイトルを1つ作成する。
+2. 出力はタイトルのみ。括弧や前置き語句は禁止。
+### 出力仕様（必ず守る）
+1. **タイトル本文のみ** を 1 行で出力すること。
+   - 接頭辞「タイトル:」「- 」や解説文（例: 「禁止語を含まず～」「120文字以内で～」）を付けない
+   - 改行・かぎ括弧・箇条書き・記号・説明を付けない
+   - 120 文字以内
+2. 上記をどうしても満たせない場合は **NOK** とだけ出力すること。
+   - NOK 以外の文字を一切書かない。
+### 禁止語
+{', '.join(BANNED_WORDS)}
+
 --- 本文 ---
 {text}"""
-    hdrs = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
+    headers = {"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01"}
 
     for i in range(max_retry + 1):
         body = {
@@ -176,7 +171,7 @@ def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
         }
         try:
             res = requests.post("https://api.anthropic.com/v1/messages",
-                                headers=hdrs, json=body, timeout=40)
+                                headers=headers, json=body, timeout=40)
             if res.status_code != 200:
                 print(f"▶ Claude HTTP {res.status_code}: retry {i}/{max_retry}")
                 time.sleep(3)
@@ -192,16 +187,18 @@ def generate_summary(text: str, max_retry: int = MAX_RETRY_BASE) -> str:
             time.sleep(3)
             continue
 
-        # 「タイトル:」「タイトル：」など先頭除去
+        # NOK 文章を即 NOK 扱い
+        if "NOK" in title.upper():
+            return "NOK"
+
         title = re.sub(r'^\s*タイトル[:：]\s*', '', title)
-        # かぎ括弧除去
         if title.startswith(("「", "\"", "『")) and title.endswith(("」", "\"", "』")):
             title = title[1:-1]
         title = re.sub(r'^.*?[「"](.*?)[」"]$', r'\1', title)
 
-        if title.upper() != "NOK" and not contains_banned(BANNED_WORDS, title):
-            return title  # 成功
-        time.sleep(1)  # 次ループへ
+        if not contains_banned(BANNED_WORDS, title):
+            return title
+        time.sleep(1)
     return "NOK"
 
 # ----------------------------------------------------------------------
@@ -214,7 +211,6 @@ def main():
     seen_ids  = set()
     diffs     = []
 
-    # 差分レス数上位 20 スレ抽出
     for t in sorted(threads, key=lambda x: x["count"] - history.get(x["url"], 0), reverse=True):
         if t["id"] in seen_ids:
             continue
@@ -230,7 +226,6 @@ def main():
         if len(diffs) == 20:
             break
 
-    # リスク判定
     candidates, updated = [], {}
     for d in diffs:
         text = fetch_thread_text(d["url"])
@@ -243,40 +238,34 @@ def main():
     ok = [c for c in candidates if c["flag"] == "OK"][:POST_COUNT]
     random.shuffle(ok)
 
-    # 履歴保存（テストモードはスキップ）
     if os.getenv("TEST_MODE") != "1":
         new_hist = {**history, **{u: updated[u] for u in updated if u in [c["url"] for c in ok]}}
         save_history(new_hist)
     else:
         print("▶ TEST_MODE: history not saved")
 
-    # 投稿候補シート
     ws_cand = GC.open_by_key(SPREADSHEET_ID).worksheet(CANDIDATE_SHEET)
     ws_cand.clear()
     ws_cand.append_row(["URL", "差分レス数", "タイトル", "炎上リスク", "コメント", "投稿可否"])
     for c in sorted(candidates, key=lambda x: x["diff"], reverse=True):
         ws_cand.append_row([c["url"], c["diff"], c["title"], c["risk"], c["comment"], c["flag"]])
 
-    # 投稿予定シート
     ws_post = GC.open_by_key(SPREADSHEET_ID).worksheet(POST_SHEET)
     ws_post.clear()
     ws_post.append_row(["日付", "投稿時間", "投稿テキスト", "投稿済み", "URL"])
 
     today = datetime.date.today()
     for idx, c in enumerate(ok):
-        # ---- タイトル生成 with extra retry (NOK / 禁止語クリアまで) ----
         summary = "NOK"
         for n in range(MAX_EXTRA_RETRY + 1):
             summary = generate_summary(fetch_thread_text(c["url"]))
             if summary.upper() != "NOK" and not contains_banned(BANNED_WORDS, summary):
                 break
             print(f"▶ Extra retry {n+1}/{MAX_EXTRA_RETRY} → {c['title']}")
-        # まだ NG -> スキップ
         if summary.upper() == "NOK" or contains_banned(BANNED_WORDS, summary):
             print(f"▶ Skip (still NG): {c['title']}")
             continue
 
-        # ---- 投稿予定シートへ書き込み ----
         post_date = today + datetime.timedelta(days=1 + idx // 2)
         time_str  = "8:00" if idx % 2 == 0 else "15:00"
         tid       = re.search(r'/thread/(\d+)/', c["url"]).group(1)
