@@ -1,0 +1,35 @@
+name: post-runner
+
+on:
+  schedule:
+    # = JST 08:00 (UTC 前日 23:00)
+    - cron: '0 23 * * *'
+    # = JST 15:00 (UTC 06:00)
+    - cron: '0 6  * * *'
+  workflow_dispatch:      # 手動トリガーも可
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1) リポジトリ取得
+      - uses: actions/checkout@v4
+
+      # 2) Python セットアップ
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3) 依存インストール
+      - run: pip install requests requests_oauthlib gspread google-auth
+
+      # 4) 投稿スクリプト実行
+      - run: python post_runner.py
+        env:
+          SPREADSHEET_ID:          ${{ secrets.SPREADSHEET_ID }}
+          GCP_SERVICE_ACCOUNT_B64: ${{ secrets.GCP_SERVICE_ACCOUNT_B64 }}
+          X_API_KEY:               ${{ secrets.X_API_KEY }}
+          X_API_SECRET:            ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN:          ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET:         ${{ secrets.X_ACCESS_SECRET }}
