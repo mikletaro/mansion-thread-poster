@@ -1,4 +1,6 @@
 gspread
 google-auth
 requests
+requests_oauthlib
 beautifulsoup4
+pytz
