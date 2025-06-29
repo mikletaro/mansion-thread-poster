@@ -16,7 +16,7 @@ SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 CLAUDE_API_KEY = os.environ["CLAUDE_API_KEY"]
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-MAX_PAGES, POST_COUNT = 3, 14
+MAX_PAGES, POST_COUNT = 3, 5
 MAX_RETRY_BASE, MAX_EXTRA_RETRY = 3, 5
 
 HISTORY_SHEET, CANDIDATE_SHEET, POST_SHEET = "スレ履歴", "投稿候補", "投稿予定"
