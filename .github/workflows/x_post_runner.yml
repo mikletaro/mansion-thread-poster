@@ -6,7 +6,7 @@ on:
     - cron: '0 23 * * *'
     # = JST 15:00（UTC 06:00）
     - cron: '0 6 * * *'
-  workflow_dispatch:      # 手動トリガーも可
+  workflow_dispatch:
 
 jobs:
   run:
@@ -21,12 +21,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 3) 依存インストール
-      - run: |
-          pip install requests requests_oauthlib gspread google-auth
+      # 3) 依存インストール  ← ここを修正
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests requests_oauthlib gspread google-auth pytz
 
       # 4) 投稿スクリプト実行
-      - run: python post_to_x.py
+      - name: Run poster
+        run: python post_to_x.py
         env:
           SPREADSHEET_ID:          ${{ secrets.SPREADSHEET_ID }}
           GCP_SERVICE_ACCOUNT_B64: ${{ secrets.GCP_SERVICE_ACCOUNT_B64 }}
